@@ -1,0 +1,18 @@
+# Runtime state (per-project engineering state, never commit)
+.engineering-craft/
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Temp / smoke scripts
+_ec_*.mjs
+ec-smoke-*
+*.tmp
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36" role="img" aria-label="Engineering craft suite">
+  <rect x="2" y="2" width="32" height="32" rx="8" fill="#12263a"/>
+  <path d="M10 12h16M10 18h11M10 24h7" fill="none" stroke="#4db6ac" stroke-width="2.4" stroke-linecap="round"/>
+  <circle cx="25" cy="24" r="4.2" fill="none" stroke="#e6b325" stroke-width="2.2"/>
+  <path d="M22.8 24l1.5 1.5 2.7-3" fill="none" stroke="#e6b325" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

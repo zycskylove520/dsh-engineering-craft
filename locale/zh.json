@@ -1,0 +1,33 @@
+{
+  "meta": {
+    "title": "工程工艺套件",
+    "description": "DSH 内工程流程：阶段门、交接物、工程记忆，以及严格的六岗位 subagent 流水线。",
+    "detail": "docs/DETAIL.md"
+  },
+  "panel": {
+    "title": "工程流程",
+    "stage": "阶段",
+    "gates": "阶段门",
+    "plan": "计划",
+    "pipeline": "岗位流水线",
+    "gatePassed": "已通过",
+    "gatePending": "未通过",
+    "missingArtifacts": "缺失交接物",
+    "noProject": "未检测到项目",
+    "openPanel": "工程面板"
+  },
+  "confirm": {
+    "title": "需要你拍板",
+    "approve": "确认",
+    "reject": "退回",
+    "goNoGo": "发布 go / no-go"
+  },
+  "roles": {
+    "product": "产品",
+    "architect": "架构",
+    "developer": "研发",
+    "tester": "测试",
+    "reviewer": "评审",
+    "ops": "运维"
+  }
+}

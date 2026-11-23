@@ -1,0 +1,33 @@
+{
+  "meta": {
+    "title": "Engineering craft suite",
+    "description": "In-DSH engineering workflow: stage gates, handoff artifacts, project memory, and a strict six-role subagent pipeline.",
+    "detail": "docs/DETAIL.md"
+  },
+  "panel": {
+    "title": "Engineering workflow",
+    "stage": "Stage",
+    "gates": "Stage gates",
+    "plan": "Plan",
+    "pipeline": "Role pipeline",
+    "gatePassed": "Passed",
+    "gatePending": "Pending",
+    "missingArtifacts": "Missing handoffs",
+    "noProject": "No project detected",
+    "openPanel": "Engineering panel"
+  },
+  "confirm": {
+    "title": "Decision required",
+    "approve": "Confirm",
+    "reject": "Send back",
+    "goNoGo": "Go / no-go"
+  },
+  "roles": {
+    "product": "Product",
+    "architect": "Architect",
+    "developer": "Developer",
+    "tester": "Tester",
+    "reviewer": "Reviewer",
+    "ops": "Operations"
+  }
+}
