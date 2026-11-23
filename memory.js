@@ -31,7 +31,14 @@ export function memoryPathOf(projectRoot, layer) {
   }
   const file = layer === 'index' ? 'INDEX.md' : `${layer}.md`
   const marker = join(dir, '.engineering-craft-marker')
-  if (fallback && !existsSync(marker)) writeFileSync(marker, '# 本目录是 .project_memory 的备选（ADR §8 名字冲突降级）\n', 'utf8')
+  if (fallback && !existsSync(marker)) {
+    // 降级目录此时尚未创建：先建目录再写 marker，否则 ENOENT 原生异常穿透工具层（BUG-02）。
+    // marker 只是标记，写入失败不应阻断正式操作——容错，由后续 init/write 的 STORAGE_UNAVAILABLE 覆盖真实落盘失败。
+    try {
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(marker, '# 本目录是 .project_memory 的备选（ADR §8 名字冲突降级）\n', 'utf8')
+    } catch { /* marker 容错：正式落盘由 init/write 各自处理并报领域错误 */ }
+  }
   return { path: join(dir, file), dir, fallback }
 }
 

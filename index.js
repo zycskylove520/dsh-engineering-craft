@@ -288,6 +288,19 @@ export function apply(ctx, config) {
       if (body.userConfirmed !== true) {
         return { ok: false, error: { code: 'NOT_USER_CONFIRMED', message: '须由确认卡点过（userConfirmed=true）', details: { gate } } }
       }
+      // 人拍板确认卡有「退回」按钮：decision=reject 时不得放行门、不得推进阶段。
+      // 旧实现忽略 decision，点「退回」与点「确认」等价，语义反转（BUG-04）。
+      if (body.decision === 'reject') {
+        const state = ecGate.read(root)
+        try {
+          metricsAction({ action: 'record', gate, outcome: 'blocked', reason: '人拍板退回', projectRoot: root })
+        } catch { /* 度量是旁路，写失败不影响打回语义 */ }
+        return {
+          ok: true, decision: 'reject', gate,
+          stage: state.stage,
+          gates: Object.fromEntries(Object.entries(state.gates).map(([g, v]) => [g, v.passed])),
+        }
+      }
       return ecGate.confirmGate(root, gate, {})
     }
     if (body.kind === 'go-no-go') {

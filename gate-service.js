@@ -377,6 +377,7 @@ export default class EcGate {
       `工程流程：阶段=${state.stage}；未过门=${pending.join(',') || '无'}；`
       + `下一岗位=${role.role ?? '(无)'}（阻塞=${role.blockedBy ?? '无'}）`,
       `缺失交接物=${missing.join(',') || '无'}；门规则见 ec_stage 工具，拍板由人确认。`,
+      '收到「开始工程」时：先用 working_directory 取当前会话目录，问用户是否在 `<该目录>` 构建并等确认；确认前不写文件，之后所有 ec_* 工具显式传已确认的 projectRoot（勿用宿主 cwd）。',
     ].join('\n')
   }
 }

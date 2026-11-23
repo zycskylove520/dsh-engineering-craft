@@ -64,46 +64,53 @@ export const ecStageTool = {
     if (cancelled(exec)) return CANCELLED()
     const root = resolveAllowedRoot(args.projectRoot ?? process.cwd())
     if (!root) return { ok: false, error: ecError('PATH_OUT_OF_ROOT', 'projectRoot 不在允许根内（EC_ALLOWED_ROOTS）', {}) }
-    const mode = args.mode ?? 'query'
-    const roleOpts = { capabilities: args.capabilities, thresholds: args.thresholds }
-    if (mode === 'next-role') {
-      const role = ecGate.nextRole(root, roleOpts)
-      return { ok: true, ...role }
-    }
-    if (mode === 'confirm-gate') {
-      if (!args.gate) return { ok: false, error: ecError('INVALID_INPUT', 'confirm-gate 须指定 gate', {}) }
-      // G1/G2 只由人拍板：工具调用者须显式声明 userConfirmed；G3 走证据路径。
-      if (args.gate === 'G3') {
-        const input = String(args.evidence ?? '')
-        const sep = input.indexOf('::')
-        const command = (sep >= 0 ? input.slice(0, sep) : input).trim()
-        const outputDigest = (sep >= 0 ? input.slice(sep + 2) : '').trim()
-        const r = ecGate.confirmG3(root, { command, outputDigest })
+    // 坏 state.json / 字段残缺时 ecGate.read 会抛领域错误（EcError）；统一转成 Result，
+    // 不让裸错误对象穿透工具层（CONTRACT §0：可恢复失败用 Result，禁止裸 SyntaxError）。
+    try {
+      const mode = args.mode ?? 'query'
+      const roleOpts = { capabilities: args.capabilities, thresholds: args.thresholds }
+      if (mode === 'next-role') {
+        const role = ecGate.nextRole(root, roleOpts)
+        return { ok: true, ...role }
+      }
+      if (mode === 'confirm-gate') {
+        if (!args.gate) return { ok: false, error: ecError('INVALID_INPUT', 'confirm-gate 须指定 gate', {}) }
+        // G1/G2 只由人拍板：工具调用者须显式声明 userConfirmed；G3 走证据路径。
+        if (args.gate === 'G3') {
+          const input = String(args.evidence ?? '')
+          const sep = input.indexOf('::')
+          const command = (sep >= 0 ? input.slice(0, sep) : input).trim()
+          const outputDigest = (sep >= 0 ? input.slice(sep + 2) : '').trim()
+          const r = ecGate.confirmG3(root, { command, outputDigest })
+          return r.ok ? { ok: true, ...r.value } : r
+        }
+        if (args.userConfirmed !== true) {
+          return {
+            ok: false,
+            error: ecError('NOT_USER_CONFIRMED', 'G1/G2 须人拍板：确认卡点击后由 Host 命令传入 userConfirmed=true', { gate: args.gate }),
+          }
+        }
+        const r = ecGate.confirmGate(root, args.gate, {})
         return r.ok ? { ok: true, ...r.value } : r
       }
-      if (args.userConfirmed !== true) {
-        return {
-          ok: false,
-          error: ecError('NOT_USER_CONFIRMED', 'G1/G2 须人拍板：确认卡点击后由 Host 命令传入 userConfirmed=true', { gate: args.gate }),
-        }
+      const state = ecGate.read(root)
+      const gateResults = Object.fromEntries(['G1', 'G2', 'G3'].map((g) => [g, ecGate.check(root, g)]))
+      const role = ecGate.nextRole(root, roleOpts)
+      const missingArtifacts = Object.entries(state.artifacts).filter(([, v]) => !v).map(([k]) => k)
+      return {
+        ok: true,
+        stage: state.stage,
+        gates: Object.fromEntries(Object.entries(state.gates).map(([g, v]) => [g, v.passed])),
+        gateResults,
+        nextRole: role.role,
+        mode: role.mode ?? 'A',
+        parallelRoles: role.roles ?? [],
+        missingArtifacts,
+        blockedBy: role.blockedBy ?? null,
       }
-      const r = ecGate.confirmGate(root, args.gate, {})
-      return r.ok ? { ok: true, ...r.value } : r
-    }
-    const state = ecGate.read(root)
-    const gateResults = Object.fromEntries(['G1', 'G2', 'G3'].map((g) => [g, ecGate.check(root, g)]))
-    const role = ecGate.nextRole(root, roleOpts)
-    const missingArtifacts = Object.entries(state.artifacts).filter(([, v]) => !v).map(([k]) => k)
-    return {
-      ok: true,
-      stage: state.stage,
-      gates: Object.fromEntries(Object.entries(state.gates).map(([g, v]) => [g, v.passed])),
-      gateResults,
-      nextRole: role.role,
-      mode: role.mode ?? 'A',
-      parallelRoles: role.roles ?? [],
-      missingArtifacts,
-      blockedBy: role.blockedBy ?? null,
+    } catch (e) {
+      if (e && typeof e === 'object' && typeof e.code === 'string') return { ok: false, error: e }
+      return { ok: false, error: ecError('STORAGE_UNAVAILABLE', `读取工程状态失败：${e?.message ?? e}`, {}) }
     }
   },
 }
@@ -131,11 +138,17 @@ export const ecArtifactTool = {
     const root = resolveAllowedRoot(args.projectRoot ?? process.cwd())
     if (!root) return { ok: false, error: ecError('PATH_OUT_OF_ROOT', 'projectRoot 不在允许根内（EC_ALLOWED_ROOTS）', {}) }
     // 注入指针登记回调而非反向 import：登记失败由 artifactAction 转成 {ok:false,error} 返回。
-    return artifactAction({
-      ...args,
-      projectRoot: root,
-      update: (patch) => ecGate.update(root, patch),
-    })
+    // ecGate.update 内部读 state.json 可能抛领域错误（坏 JSON）；统一兜成 Result。
+    try {
+      return artifactAction({
+        ...args,
+        projectRoot: root,
+        update: (patch) => ecGate.update(root, patch),
+      })
+    } catch (e) {
+      if (e && typeof e === 'object' && typeof e.code === 'string') return { ok: false, error: e }
+      return { ok: false, error: ecError('STORAGE_UNAVAILABLE', `交接物操作失败：${e?.message ?? e}`, {}) }
+    }
   },
 }
 
@@ -163,7 +176,9 @@ export const ecMemoryTool = {
   },
   async execute(args, exec) {
     if (cancelled(exec)) return CANCELLED()
-    return memoryAction(args)
+    const root = resolveAllowedRoot(args.projectRoot ?? process.cwd())
+    if (!root) return { ok: false, error: ecError('PATH_OUT_OF_ROOT', 'projectRoot 不在允许根内（EC_ALLOWED_ROOTS）', {}) }
+    return memoryAction({ ...args, projectRoot: root })
   },
 }
 
@@ -189,7 +204,9 @@ export const ecGateMetricsTool = {
   },
   async execute(args, exec) {
     if (cancelled(exec)) return CANCELLED()
-    return metricsAction(args)
+    const root = resolveAllowedRoot(args.projectRoot ?? process.cwd())
+    if (!root) return { ok: false, error: ecError('PATH_OUT_OF_ROOT', 'projectRoot 不在允许根内（EC_ALLOWED_ROOTS）', {}) }
+    return metricsAction({ ...args, projectRoot: root })
   },
 }
 

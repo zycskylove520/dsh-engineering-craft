@@ -5,7 +5,7 @@
 import { ecGate } from './tools.js'
 import { metricsAction } from './metrics.js'
 import { memoryAction } from './memory.js'
-import { normalizeProjectRoot } from './gate-service.js'
+import { resolveAllowedRoot, ecError } from './gate-service.js'
 
 /**
  * 解析并执行一行 /ec 子命令（纯逻辑，便于 Host 与 HTTP action 复用）。
@@ -16,7 +16,12 @@ import { normalizeProjectRoot } from './gate-service.js'
  * @returns {object} 结构化结果（含 ok / 各子命令字段）
  */
 export function runEcCommand(line, projectRoot, opts = {}) {
-  const root = normalizeProjectRoot(projectRoot)
+  // 安全边界：与 ec_stage/ec_artifact/HTTP 一致，projectRoot 须落在 EC_ALLOWED_ROOTS 内。
+  // 传 undefined 时用 cwd（cwd 默认在允许根内）；越界返回领域错误，不读也不写。
+  const root = resolveAllowedRoot(projectRoot ?? process.cwd())
+  if (!root) {
+    return { ok: false, error: ecError('PATH_OUT_OF_ROOT', 'projectRoot 不在允许根内（EC_ALLOWED_ROOTS）', { projectRoot }) }
+  }
   const parts = String(line ?? '').trim().split(/\s+/).filter(Boolean)
   const sub = (parts[0] === '/ec' ? parts[1] : parts[0]) ?? 'status'
   const rest = parts.slice(parts[0] === '/ec' ? 2 : 1)
