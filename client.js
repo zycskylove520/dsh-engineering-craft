@@ -89,6 +89,15 @@ window.__ModuleLoader__.load({
     const fallbackSnapshot = () => FALLBACK_SNAPSHOT
     const fallbackTranslate = (k) => (DICT.zh[k] ?? k)
     let localeSeat = null // { subscribe, getSnapshot, translate }
+    // conversation.view tab 组件拿不到 projectRoot；由 conversation.input.left 探针按 sessionId
+    // 问宿主 /api/engineering-craft/workspace 得到根，存这里并通知面板刷新（same-session 上下文）。
+    let sessionRoot = null
+    const rootSubs = new Set()
+    const setSessionRoot = (p) => {
+      if (typeof p !== 'string' || !p.trim() || p === sessionRoot) return
+      sessionRoot = p.trim()
+      for (const fn of rootSubs) { try { fn() } catch { /* 单个订阅者失败不影响其它 */ } }
+    }
 
     /**
      * 翻译 hook：用 useSyncExternalStore 订阅 LocaleFace revision；返回稳定的 t(key)。
@@ -111,6 +120,7 @@ window.__ModuleLoader__.load({
     function guessProjectRoot(props) {
       const candidates = [
         props?.projectRoot,
+        sessionRoot,
         window.__DSH_BOOT__?.workspace,
         window.__DSH_BOOT__?.workspaceRoot,
         window.__DSH_BOOT__?.projectRoot,
@@ -164,6 +174,13 @@ window.__ModuleLoader__.load({
       const [state, setState] = useState(null)
       const [error, setError] = useState(null)
       const [version, setVersion] = useState(0)
+
+      // 探针异步拿到会话工作区后通知面板重取（探针注册在 conversation.input.left）
+      useEffect(() => {
+        const fn = () => setVersion((v) => v + 1)
+        rootSubs.add(fn)
+        return () => rootSubs.delete(fn)
+      }, [])
 
       useEffect(() => {
         let alive = true
@@ -260,6 +277,24 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 隐藏探针（注册在 conversation.input.left）：该槽位每个会话都渲染，props 带 sessionId。
+     * 拿 sessionId 问宿主当前工作区路径 → setSessionRoot → 面板重取。
+     * 机制与 dsh-bili-scroll 的 ScopeProbe 一致（已验证可从 props 拿 sessionId）。
+     */
+    function WorkspaceProbe(props) {
+      const sessionId = props?.sessionId
+      useEffect(() => {
+        if (!sessionId) return
+        let alive = true
+        api(`/api/engineering-craft/workspace?session=${encodeURIComponent(sessionId)}`).then((r) => {
+          if (alive && r?.ok && r?.workspace?.path) setSessionRoot(r.workspace.path)
+        })
+        return () => { alive = false }
+      }, [sessionId])
+      return h('span', { 'data-ec-probe': '', style: { display: 'none' } })
+    }
+
+    /**
      * Client 上下文；注册字典与三个 slot，每个 inject 回调返回 register 的 disposer。
      * 只依赖 DSH 自带系统插件 ctx.locale（@deepseek-ai/dsh-client-locale）。
      * @param {{slots: object, locale?: object}} ctx Client 上下文
@@ -283,26 +318,54 @@ window.__ModuleLoader__.load({
       const slots = ctx?.slots
       if (!slots || typeof slots.register !== 'function' || typeof slots.inject !== 'function') return
 
+      // DSH slot 标识字段按 slot 类型不同（实测样板）：
+      //  - main 是 keyed slot，用 key（skill-explorer/ssh/im/settings/free-search 均如此）；
+      //  - conversation.session.header.actions / shell.overlay 用 id（dsh-cost-meter 如此）。
+      // 旧实现三处都用 key，导致 header 入口与确认卡被拒（BUG-06）；一度把 main 也改成 id，
+      // 那会反过来破坏原本正确的 main 面板——故 main 恢复 key，另两处保持 id。
       ctx.effect(() => slots.inject('main', () => slots.register({
         name: 'main', key: 'engineering-craft', order: 50,
         locale: localeSeat,
       }, EcPanel)), 'engineering-craft: main 面板')
 
-      ctx.effect(() => slots.inject('conversation.session.header.actions', () => slots.register({
-        name: 'conversation.session.header.actions',
-        key: 'engineering-craft-open',
-        order: 50,
-        label: () => (localeSeat?.translate('openPanel') ?? DICT.zh.openPanel),
-        title: () => (localeSeat?.translate('openPanel') ?? DICT.zh.openPanel),
-        locale: localeSeat,
-      }, EcPanelButton)), 'engineering-craft: header 入口')
+      // 入口放在「对话/轨迹/上下文/刷过的视频/编队」同一行 —— 该行是 conversation.view list 槽，
+      // 壳子 viewTabs() 对每个注册项画一个 tab（证据：dsh-bili-scroll client.js 注释 + dsh-context
+      // 的 context/fleet tab 都注册在此）。样板字段：{name:'conversation.view', id, order, label, scope:'session'}。
+      // 曾误用 sidebar.right.pane.tab / sidebarRightTabs（那是右侧 studio 行，不是这里），已纠正。
+      const TAB_ID = 'engineering-craft'
+      const tabLabel = () => (localeSeat?.translate('panel.title') ?? DICT.zh['panel.title'])
+      ctx.effect(() => slots.inject('conversation.view', () => {
+        try {
+          return slots.register({
+            name: 'conversation.view',
+            id: TAB_ID,
+            order: 90,
+            label: tabLabel(),
+            scope: 'session',
+            locale: localeSeat,
+          }, (props) => h(EcPanel, { ...props, embedded: true }))
+        } catch (e) {
+          console.warn('[engineering-craft] conversation.view tab 注册降级：', e?.message ?? e)
+          return () => {}
+        }
+      }), 'engineering-craft: 会话 tab 入口')
+
+      // 隐藏探针：从会话上下文拿 sessionId → 查宿主工作区 → 面板得到 projectRoot。
+      try {
+        ctx.effect(() => slots.inject('conversation.input.left', () => slots.register({
+          name: 'conversation.input.left', id: 'engineering-craft-scope', order: 5,
+        }, (props) => h(WorkspaceProbe, props || {}))), 'engineering-craft: 工作区探针')
+      } catch (e) {
+        console.warn('[engineering-craft] 工作区探针注册降级：', e?.message ?? e)
+      }
 
       ctx.effect(() => slots.inject('shell.overlay', () => slots.register({
-        name: 'shell.overlay', key: 'engineering-craft-confirm', order: 100,
+        name: 'shell.overlay', id: 'engineering-craft-confirm', order: 100,
         locale: localeSeat,
       }, EcConfirmCard)), 'engineering-craft: 拍板确认卡')
     }
 
+    // 与 dsh-context 样板一致：factory 只声明 slots/locale；sidebarRightTabs 在 apply 内用 ctx.inject 动态取。
     return { inject: ['slots', 'locale'], apply }
   },
 })

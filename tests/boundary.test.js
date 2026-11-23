@@ -4,13 +4,14 @@
  * 以及 gate-service.safePathWithin 的路径穿越基本拒绝。
  * 纪律：不 mock 被测纯函数；断言具体 code / details / 返回值。
  */
-import { test, describe } from 'node:test'
+import { test, describe, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { join, resolve } from 'node:path'
 import { checkGate, nextRole, DEFAULT_PIPELINE } from '../rules.js'
 import {
   safePathWithin, initialState, statePathOf, DEFAULT_GATES,
   STATE_DIR_NAME, STATE_FILE_NAME, ecError,
+  dshWorkspaceRoots, resolveAllowedRoot,
 } from '../gate-service.js'
 
 /** 自带门规则表，与 CONTRACT §4.2 默认值一致（不依赖实现内部常量）。 */
@@ -182,6 +183,37 @@ describe('nextRole · 上游交接物缺失与六岗位严格顺序（CONTRACT �
 
   test('state.artifacts 缺失时防御性返回 product，不抛错', () => {
     assert.deepEqual(nextRole({}), { role: 'product' })
+  })
+})
+
+describe('resolveAllowedRoot · 默认允许根纳入 DSH 工作区（BUG：宿主 cwd ≠ 会话工作目录）', () => {
+  const saved = process.env.EC_ALLOWED_ROOTS
+  afterEach(() => { if (saved === undefined) delete process.env.EC_ALLOWED_ROOTS; else process.env.EC_ALLOWED_ROOTS = saved })
+
+  test('dshWorkspaceRoots 读到本机已登记工作区（纯读、容错）', () => {
+    const roots = dshWorkspaceRoots()
+    assert.ok(Array.isArray(roots))
+    // 本机 workspace.json 含 test_project；若换环境无该文件则允许为空，不崩。
+    for (const r of roots) assert.equal(typeof r, 'string')
+  })
+
+  test('未设 EC_ALLOWED_ROOTS 时，工作区内项目根被放行（原先只有 cwd+tmpdir 会误拒）', () => {
+    delete process.env.EC_ALLOWED_ROOTS
+    const roots = dshWorkspaceRoots()
+    if (roots.length === 0) return // 无工作区文件时跳过断言，不误报
+    assert.equal(resolveAllowedRoot(roots[0]), resolve(roots[0]))
+  })
+
+  test('工作区外的路径仍被拒绝（加入工作区不削弱安全边界）', () => {
+    delete process.env.EC_ALLOWED_ROOTS
+    assert.equal(resolveAllowedRoot('Z:/definitely/outside'), null)
+  })
+
+  test('显式 EC_ALLOWED_ROOTS 优先：不自动并入工作区（收紧语义保持）', () => {
+    process.env.EC_ALLOWED_ROOTS = 'Z:/explicit-only'
+    assert.equal(resolveAllowedRoot('Z:/explicit-only/sub'), resolve('Z:/explicit-only/sub'))
+    const w = dshWorkspaceRoots()[0]
+    if (w) assert.equal(resolveAllowedRoot(w), null, '显式配置时工作区不应被自动放行')
   })
 })
 

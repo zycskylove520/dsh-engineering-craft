@@ -344,6 +344,22 @@ export function apply(ctx, config) {
       if (!sameOriginOk(req)) return sendJson(res, 403, { ok: false, error: '只接受本机同源请求' })
       try {
         const url = new URL(req.url, 'http://127.0.0.1')
+        // 会话 → 工作区路径：面板 tab（conversation.view）拿不到 projectRoot，只能拿 sessionId，
+        // 由宿主查 workspaceRegistry（与 dsh-bili-scroll session-scope 同一已验证机制）。
+        if (req.method === 'GET' && url.pathname === '/api/engineering-craft/workspace') {
+          const sid = String(url.searchParams.get('session') || '').trim()
+          let workspace = null
+          try {
+            const registry = typeof ctx.get === 'function' ? ctx.get('workspaceRegistry') : null
+            for (const w of (registry?.list?.() || [])) {
+              if ((w?.sessionIds || []).some((x) => String(x) === sid)) {
+                workspace = { path: String(w.path || ''), title: String(w.title || '') }
+                break
+              }
+            }
+          } catch { /* 注册表不可用 → 返回空，面板显示"未检测到项目根"，不崩 */ }
+          return sendJson(res, 200, { ok: true, session: sid, workspace })
+        }
         if (req.method === 'GET' && url.pathname === '/api/engineering-craft/state') {
           const input = url.searchParams.get('projectRoot')
           const root = resolveRoot(input)

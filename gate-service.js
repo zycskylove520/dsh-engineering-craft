@@ -5,7 +5,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join, normalize, resolve, sep } from 'node:path'
-import { tmpdir } from 'node:os'
+import { tmpdir, homedir } from 'node:os'
 import { checkGate, nextRole, gatesBetween, DEFAULT_PIPELINE } from './rules.js'
 
 /** 状态文件名与目录名（相对 projectRoot）。 */
@@ -103,8 +103,33 @@ export function safePathWithin(target, root) {
 }
 
 /**
+ * 读 DSH 已登记的工作区目录作为默认允许根候选。
+ * 宿主进程 cwd 是 profile 目录、与会话工作目录（用户实际项目）不同；若缺省只允许 cwd，
+ * 工具在用户自己的项目里会被 PATH_OUT_OF_ROOT 拒绝（"开始工程先确认当前会话目录"规则失效）。
+ * 工作区来自 ~/.dsh/storages/workspace.json（DSH workspace service 的稳定落盘），纯读、容错。
+ * @returns {string[]} 工作区绝对路径数组；读不到返回 []
+ */
+export function dshWorkspaceRoots() {
+  try {
+    const home = process.env.DSH_HOME || join(homedir(), '.dsh')
+    const file = join(home, 'storages', 'workspace.json')
+    if (!existsSync(file)) return []
+    const parsed = JSON.parse(readFileSync(file, 'utf8'))
+    const workspaces = parsed?.tables?.workspaces
+    if (!workspaces || typeof workspaces !== 'object') return []
+    return Object.values(workspaces)
+      .map((w) => w?.path)
+      .filter((p) => typeof p === 'string' && p.trim())
+      .map((p) => resolve(normalize(p)))
+  } catch {
+    return []
+  }
+}
+
+/**
  * 把调用方给的 projectRoot 解析到显式允许根集合内（安全边界）。
- * 允许根来自环境变量 EC_ALLOWED_ROOTS（分号分隔的绝对路径），缺省为 process.cwd()。
+ * 允许根来自环境变量 EC_ALLOWED_ROOTS（分号分隔的绝对路径）；缺省为
+ * process.cwd()（宿主 profile）+ 系统临时目录 + DSH 已登记的工作区目录。
  * 不能用 input 自身当允许根（那样恒真、等于无校验）。
  * @param {string} input 调用方给的项目根
  * @returns {string|null} 落在允许根内的规范绝对路径，否则 null
@@ -112,11 +137,11 @@ export function safePathWithin(target, root) {
 export function resolveAllowedRoot(input) {
   if (typeof input !== 'string' || !input.trim()) return null
   const configured = process.env.EC_ALLOWED_ROOTS
-  // 缺省允许：当前工作目录 + 系统临时目录（测试/一次性冒烟用 os.tmpdir，系统隔离）。
-  // 生产若需收紧，设 EC_ALLOWED_ROOTS 显式覆盖。
+  // 缺省允许：宿主 cwd + 系统临时目录（测试冒烟）+ DSH 工作区（用户实际项目）。
+  // 生产若需收紧，设 EC_ALLOWED_ROOTS 显式覆盖（此时不再自动加入工作区）。
   const roots = (configured && configured.trim())
     ? configured.split(';').map((s) => s.trim()).filter(Boolean)
-    : [process.cwd(), tmpdir()]
+    : [process.cwd(), tmpdir(), ...dshWorkspaceRoots()]
   const candidate = resolve(normalize(isAbsolute(input) ? input : join(process.cwd(), input)))
   for (const root of roots) {
     const allowed = safePathWithin(candidate, root)
