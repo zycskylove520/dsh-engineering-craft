@@ -51,3 +51,11 @@
 ## 安装状态
 
 已安装在 desktop profile（`include:@local/dsh-engineering-craft`），链接本地目录工作区源码——后续改源码 HMR 自动重载；要下发给别人时把包目录发布，对方用插件管理器「添加本地目录」安装。
+
+---
+
+## 追加变更（2026-11-23 · 不重写上文历史）
+
+- **projectRoot 去白名单，支持远程工程**：`resolveAllowedRoot` 改为纯文本标签规范化（详见 CONTRACT §11）。原先「允许根安全边界」的设计被主人判定为过度约束——工程路径由用户/宿主记忆与 SSH 工具负责，插件只按标签落盘，干净解耦。
+- **注意 HMR 边界**：本次改动涉及 host 工具模块（gate-service/tools/command/index），**HMR 只热重载 client，host 模块需重启 DSH 才加载新代码**。重启前运行中的 `ec_stage` 仍报旧的 `PATH_OUT_OF_ROOT`，属预期现象，不是改动失败。
+- 新增 `ec-path.js`（已加入 package.json `files` 白名单需在发布前确认）；全套测试 80/80 绿（新增远端标签断言）。

@@ -1,11 +1,11 @@
 /**
  * metrics.js —— GATE-LOG 门度量记录/回看（CONTRACT §5.4）。
  * 存 <projectRoot>/.engineering-craft/gate-log.jsonl（每行一条 JSON，bounded 读取）；
- * 每次门拦截/放行都留原因与指针，供反复拦截时回写规范。路径做项目根白名单校验。
+ * 每次门拦截/放行都留原因与指针，供反复拦截时回写规范。路径做 projectRoot 标签内的防 .. 穿越校验。
  */
 import { existsSync, mkdirSync, readFileSync, appendFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { STATE_DIR_NAME, normalizeProjectRoot, safePathWithin, ecError } from './gate-service.js'
+import { joinFor } from './ec-path.js'
 
 /** GATE-LOG 文件名。 */
 export const GATE_LOG_NAME = 'gate-log.jsonl'
@@ -16,7 +16,7 @@ export const GATE_LOG_NAME = 'gate-log.jsonl'
  * @returns {string} jsonl 绝对路径
  */
 export function gateLogPathOf(projectRoot) {
-  return join(normalizeProjectRoot(projectRoot), STATE_DIR_NAME, GATE_LOG_NAME)
+  return joinFor(normalizeProjectRoot(projectRoot), STATE_DIR_NAME, GATE_LOG_NAME)
 }
 
 /**
@@ -30,7 +30,7 @@ export function metricsAction(args) {
   const action = String(args?.action ?? 'list')
   const projectRoot = args.projectRoot ?? process.cwd()
   const root = safePathWithin(projectRoot, projectRoot)
-  if (!root) return { ok: false, error: ecError('PATH_OUT_OF_ROOT', `项目根非法：${projectRoot}`, { projectRoot }) }
+  if (!root) return { ok: false, error: ecError('INVALID_INPUT', `projectRoot 是空标签：${projectRoot}`, { projectRoot }) }
   const file = gateLogPathOf(root)
   const safe = safePathWithin(file, root)
   if (!safe) return { ok: false, error: ecError('PATH_OUT_OF_ROOT', `日志路径越出项目根：${file}`, { path: file }) }
@@ -50,7 +50,7 @@ export function metricsAction(args) {
       evidencePath: safe,
     }
     try {
-      mkdirSync(join(root, STATE_DIR_NAME), { recursive: true })
+      mkdirSync(joinFor(root, STATE_DIR_NAME), { recursive: true })
       appendFileSync(safe, JSON.stringify(record) + '\n', 'utf8')
       return { ok: true, records: [record], truncated: false, status: 'recorded' }
     } catch (e) {

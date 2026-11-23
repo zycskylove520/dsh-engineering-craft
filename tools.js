@@ -55,7 +55,7 @@ export const ecStageTool = {
         additionalProperties: false,
         description: '形态 B 收益门阈值',
       },
-      projectRoot: { type: 'string', description: '项目根绝对路径，缺省用当前工作目录' },
+      projectRoot: { type: 'string', description: '项目根路径标签（本机或远端均可，如 /remote/path/to/Project）；不做存在性校验，缺省用当前工作目录' },
     },
     required: ['mode'],
     additionalProperties: false,
@@ -63,7 +63,7 @@ export const ecStageTool = {
   async execute(args, exec) {
     if (cancelled(exec)) return CANCELLED()
     const root = resolveAllowedRoot(args.projectRoot ?? process.cwd())
-    if (!root) return { ok: false, error: ecError('PATH_OUT_OF_ROOT', 'projectRoot 不在允许根内（EC_ALLOWED_ROOTS）', {}) }
+    if (!root) return { ok: false, error: ecError('INVALID_INPUT', 'projectRoot 是空标签（须非空字符串）', {}) }
     // 坏 state.json / 字段残缺时 ecGate.read 会抛领域错误（EcError）；统一转成 Result，
     // 不让裸错误对象穿透工具层（CONTRACT §0：可恢复失败用 Result，禁止裸 SyntaxError）。
     try {
@@ -127,8 +127,8 @@ export const ecArtifactTool = {
     properties: {
       action: { type: 'string', enum: ['create', 'validate'], description: 'create=写模板；validate=只读校验' },
       kind: { type: 'string', enum: ['prd', 'adr', 'contract', 'plan', 'brief', 'release', 'testReport', 'findings'] },
-      path: { type: 'string', description: '目标绝对路径；须落在允许根内（PATH_OUT_OF_ROOT 防穿越）' },
-      projectRoot: { type: 'string', description: '项目根绝对路径，缺省用当前工作目录' },
+      path: { type: 'string', description: '目标路径；须落在 projectRoot 标签内（防 .. 穿越）' },
+      projectRoot: { type: 'string', description: '项目根路径标签（本机或远端均可，如 /remote/path/to/Project）；不做存在性校验，缺省用当前工作目录' },
     },
     required: ['action', 'kind', 'path'],
     additionalProperties: false,
@@ -136,7 +136,7 @@ export const ecArtifactTool = {
   async execute(args, exec) {
     if (cancelled(exec)) return CANCELLED()
     const root = resolveAllowedRoot(args.projectRoot ?? process.cwd())
-    if (!root) return { ok: false, error: ecError('PATH_OUT_OF_ROOT', 'projectRoot 不在允许根内（EC_ALLOWED_ROOTS）', {}) }
+    if (!root) return { ok: false, error: ecError('INVALID_INPUT', 'projectRoot 是空标签（须非空字符串）', {}) }
     // 注入指针登记回调而非反向 import：登记失败由 artifactAction 转成 {ok:false,error} 返回。
     // ecGate.update 内部读 state.json 可能抛领域错误（坏 JSON）；统一兜成 Result。
     try {
@@ -163,7 +163,7 @@ export const ecMemoryTool = {
     type: 'object',
     properties: {
       action: { type: 'string', enum: ['init', 'write', 'query'], description: 'init=建骨架；write=写规范带来源+日期；query=按需读' },
-      projectRoot: { type: 'string', description: '项目根绝对路径；缺省用当前工作目录' },
+      projectRoot: { type: 'string', description: '项目根路径标签（本机或远端均可，如 /remote/path/to/Project）；不做存在性校验，缺省用当前工作目录' },
       layer: {
         type: 'string', enum: ['architecture', 'conventions', 'project', 'open-questions', 'index'],
         description: 'write/query 的目标层（index 指 INDEX.md）',
@@ -177,7 +177,7 @@ export const ecMemoryTool = {
   async execute(args, exec) {
     if (cancelled(exec)) return CANCELLED()
     const root = resolveAllowedRoot(args.projectRoot ?? process.cwd())
-    if (!root) return { ok: false, error: ecError('PATH_OUT_OF_ROOT', 'projectRoot 不在允许根内（EC_ALLOWED_ROOTS）', {}) }
+    if (!root) return { ok: false, error: ecError('INVALID_INPUT', 'projectRoot 是空标签（须非空字符串）', {}) }
     return memoryAction({ ...args, projectRoot: root })
   },
 }
@@ -197,7 +197,7 @@ export const ecGateMetricsTool = {
       outcome: { type: 'string', enum: ['blocked', 'passed'], description: 'record 时必填' },
       reason: { type: 'string', description: 'record 时：拦截/放行原因摘要（bounded）' },
       limit: { type: 'integer', minimum: 1, maximum: 100, default: 20, description: 'list 时最多返回条数' },
-      projectRoot: { type: 'string', description: '项目根绝对路径，缺省用当前工作目录' },
+      projectRoot: { type: 'string', description: '项目根路径标签（本机或远端均可，如 /remote/path/to/Project）；不做存在性校验，缺省用当前工作目录' },
     },
     required: ['action'],
     additionalProperties: false,
@@ -205,7 +205,7 @@ export const ecGateMetricsTool = {
   async execute(args, exec) {
     if (cancelled(exec)) return CANCELLED()
     const root = resolveAllowedRoot(args.projectRoot ?? process.cwd())
-    if (!root) return { ok: false, error: ecError('PATH_OUT_OF_ROOT', 'projectRoot 不在允许根内（EC_ALLOWED_ROOTS）', {}) }
+    if (!root) return { ok: false, error: ecError('INVALID_INPUT', 'projectRoot 是空标签（须非空字符串）', {}) }
     return metricsAction({ ...args, projectRoot: root })
   },
 }

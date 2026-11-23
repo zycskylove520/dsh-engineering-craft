@@ -8,6 +8,7 @@ import { test, describe, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { join, resolve } from 'node:path'
 import { checkGate, nextRole, DEFAULT_PIPELINE } from '../rules.js'
+import { isPosixLabel, resolveFor } from '../ec-path.js'
 import {
   safePathWithin, initialState, statePathOf, DEFAULT_GATES,
   STATE_DIR_NAME, STATE_FILE_NAME, ecError,
@@ -186,34 +187,48 @@ describe('nextRole · 上游交接物缺失与六岗位严格顺序（CONTRACT �
   })
 })
 
-describe('resolveAllowedRoot · 默认允许根纳入 DSH 工作区（BUG：宿主 cwd ≠ 会话工作目录）', () => {
+describe('resolveAllowedRoot · projectRoot 为文本标签（无白名单，支持远端路径）', () => {
   const saved = process.env.EC_ALLOWED_ROOTS
   afterEach(() => { if (saved === undefined) delete process.env.EC_ALLOWED_ROOTS; else process.env.EC_ALLOWED_ROOTS = saved })
 
-  test('dshWorkspaceRoots 读到本机已登记工作区（纯读、容错）', () => {
+  test('dshWorkspaceRoots 读到本机已登记工作区（纯读、容错，仍保留供其他用途）', () => {
     const roots = dshWorkspaceRoots()
     assert.ok(Array.isArray(roots))
-    // 本机 workspace.json 含 test_project；若换环境无该文件则允许为空，不崩。
     for (const r of roots) assert.equal(typeof r, 'string')
   })
 
-  test('未设 EC_ALLOWED_ROOTS 时，工作区内项目根被放行（原先只有 cwd+tmpdir 会误拒）', () => {
+  test('远端 POSIX 路径标签原样保留，不被改写成 Windows 盘符（核心解耦）', () => {
     delete process.env.EC_ALLOWED_ROOTS
-    const roots = dshWorkspaceRoots()
-    if (roots.length === 0) return // 无工作区文件时跳过断言，不误报
-    assert.equal(resolveAllowedRoot(roots[0]), resolve(roots[0]))
+    assert.equal(resolveAllowedRoot('/remote/path/to/Project'), '/remote/path/to/Project')
+    assert.equal(resolveAllowedRoot('/remote/path/to/Project/'), '/remote/path/to/Project')
   })
 
-  test('工作区外的路径仍被拒绝（加入工作区不削弱安全边界）', () => {
+  test('原先被白名单拒绝的工作区外路径，现在作为标签放行', () => {
     delete process.env.EC_ALLOWED_ROOTS
-    assert.equal(resolveAllowedRoot('Z:/definitely/outside'), null)
+    assert.equal(resolveAllowedRoot('Z:/definitely/outside'), resolve('Z:/definitely/outside'))
   })
 
-  test('显式 EC_ALLOWED_ROOTS 优先：不自动并入工作区（收紧语义保持）', () => {
+  test('空/非字符串标签仍返回 null（唯一拒绝分支）', () => {
+    delete process.env.EC_ALLOWED_ROOTS
+    assert.equal(resolveAllowedRoot(''), null)
+    assert.equal(resolveAllowedRoot('   '), null)
+    assert.equal(resolveAllowedRoot(undefined), null)
+  })
+
+  test('相对标签按 EC_ALLOWED_ROOTS 第一个基准解析（兼容旧相对语义）', () => {
     process.env.EC_ALLOWED_ROOTS = 'Z:/explicit-only'
-    assert.equal(resolveAllowedRoot('Z:/explicit-only/sub'), resolve('Z:/explicit-only/sub'))
-    const w = dshWorkspaceRoots()[0]
-    if (w) assert.equal(resolveAllowedRoot(w), null, '显式配置时工作区不应被自动放行')
+    assert.equal(resolveAllowedRoot('sub/proj'), resolve('Z:/explicit-only/sub/proj'))
+  })
+
+  test('绝对路径标签不受 EC_ALLOWED_ROOTS 基准影响', () => {
+    process.env.EC_ALLOWED_ROOTS = 'Z:/explicit-only'
+    assert.equal(resolveAllowedRoot('D:/other/project'), resolve('D:/other/project'))
+    assert.equal(resolveAllowedRoot('/remote/path/proj'), '/remote/path/proj')
+  })
+
+  test('远端 POSIX 标签的 statePathOf 落在 <标签>/.engineering-craft/state.json', () => {
+    const p = statePathOf('/remote/path/to/Project')
+    assert.equal(p, '/remote/path/to/Project/.engineering-craft/state.json')
   })
 })
 
@@ -251,12 +266,59 @@ describe('safePathWithin · 路径穿越基本拒绝（CONTRACT §4.1 PATH_OUT_O
     assert.equal(safePathWithin('   ', root), null)
   })
 
-  test('符号链接：词法规范化对根内相对路径放行，realpath 越界不在防御范围（已知限制）', () => {
-    // 本函数用 node:path resolve/normalize，只做词法规范化、不解析 symlink。
-    // 断言真实行为：根内 './sub/../a.md' 规范化后仍落在根内 → 放行；
-    // "根内符号链接指向根外"不在防御范围，按设计记录（Windows 建链权限受限，实测见 TEST-REPORT 未验证项）。
+  test('词法规范化：根内 ./sub/../a.md 放行（symlink 逃逸不在防御范围，已知限制）', () => {
+    // 只做词法规范化、不解析 symlink；根内 './sub/../a.md' 规范化后仍落根内 → 放行。
+    // "根内符号链接指向根外"不在防御范围，按设计记录（Windows 建链权限受限）。
     const inside = safePathWithin('./sub/../a.md', root)
     assert.equal(inside, join('E:/proj/root', 'a.md'))
+  })
+})
+
+describe('safePathWithin · 安全回归（POSIX 标签 + Windows 宿主交叉态）', () => {
+  const posixRoot = '/remote/root'
+
+  test('F1 反斜杠 .. 穿越必须拒绝（Windows fs 会把 \\ 当分隔符，实测曾写到根外）', () => {
+    assert.equal(safePathWithin(String.raw`..\evil.md`, posixRoot), null)
+    assert.equal(safePathWithin(String.raw`..\..\evil.md`, posixRoot), null)
+    assert.equal(safePathWithin(String.raw`sub\..\..\evil.md`, posixRoot), null)
+  })
+
+  test('F1 正斜杠 .. 穿越同样拒绝（回归：原有防线不回退）', () => {
+    assert.equal(safePathWithin('../evil.md', posixRoot), null)
+    assert.equal(safePathWithin('/remote/root/../evil.md', posixRoot), null)
+  })
+
+  test('F1 合法子路径仍放行且返回标签形态（不改写盘符）', () => {
+    assert.equal(safePathWithin('PRD.md', posixRoot), '/remote/root/PRD.md')
+    assert.equal(safePathWithin('sub/a.md', posixRoot), '/remote/root/sub/a.md')
+  })
+
+  test('F1 跨 scheme 绝对 target 越界拒绝', () => {
+    assert.equal(safePathWithin(String.raw`C:\remote\root\f.md`, posixRoot), null)
+    assert.equal(safePathWithin('/remote/root-evil/f.md', posixRoot), null)
+  })
+
+  test('F2 projectRoot 为文件系统根时，合法子路径不被双分隔符误拒', () => {
+    assert.equal(safePathWithin('foo', '/'), '/foo')
+    assert.equal(safePathWithin('C:\\foo', 'C:\\'), 'C:\\foo')
+    assert.equal(safePathWithin('foo', 'C:\\'), 'C:\\foo')
+  })
+
+  test('空 projectRoot 标签 → null（能力层空标签一致性）', () => {
+    assert.equal(safePathWithin('PRD.md', ''), null)
+    assert.equal(safePathWithin('PRD.md', '   '), null)
+  })
+
+  test('UNC 形态 // 标签不被判为 POSIX 单斜杠标签（nit：避免静默折叠）', () => {
+    assert.equal(isPosixLabel('//server/share/x'), false)
+    assert.equal(isPosixLabel('/server/share/x'), true)
+    // resolveAllowedRoot 对 // 标签按平台原生语义处理，不再走 posix 折叠。
+    assert.notEqual(resolveAllowedRoot('//server/share/x'), '/server/share/x')
+  })
+
+  test('resolveFor 对 POSIX 标签保持 / 开头（标签形态不改写盘符）', () => {
+    assert.equal(resolveFor('/remote/path/to/Project'), '/remote/path/to/Project')
+    assert.equal(resolveFor('/remote/path/to/Project/'), '/remote/path/to/Project')
   })
 })
 

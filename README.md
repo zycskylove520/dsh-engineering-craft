@@ -76,7 +76,7 @@
 
 ## 配置
 
-- **允许根（安全边界）**：工具与 HTTP 入口只接受落在允许根内的项目路径。默认允许当前工作目录 + 系统临时目录；如需收紧或放行别处，设环境变量 `EC_ALLOWED_ROOTS`（多个路径用分号分隔）。传越界路径返回 `PATH_OUT_OF_ROOT`。
+- **项目路径是文本标签（不做存在性校验）**：`projectRoot` 既可以是本机路径，也可以是远端路径（如 `/remote/path/to/Project`）。插件不校验它是否存在、不在白名单内与否——工程在哪里、是不是远程、怎么挂载，由你/宿主记忆与 SSH 工具负责。状态与记忆就落在 `<projectRoot>/.engineering-craft/` 和 `<projectRoot>/.project_memory/`（远端路径需该路径在你的宿主环境可写，或由你同步）。POSIX 风格标签（`/` 开头）原样保留，不会被改写成 Windows 盘符；相对标签按当前目录（或可选 `EC_ALLOWED_ROOTS` 的第一项）解析。只有空标签返回 `INVALID_INPUT`。
 - **门规则与并行阈值**：通过插件 Config 覆盖（`gates` / `thresholds.minFilesForParallel`，后者是研发岗并行的最小单元数，默认 2）。
 - **中英双语**：面板/确认卡文案走 DSH 系统 locale，在设置里切语言即时生效。
 

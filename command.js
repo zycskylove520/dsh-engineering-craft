@@ -7,6 +7,7 @@ import { metricsAction } from './metrics.js'
 import { memoryAction } from './memory.js'
 import { resolveAllowedRoot, ecError } from './gate-service.js'
 
+
 /**
  * 解析并执行一行 /ec 子命令（纯逻辑，便于 Host 与 HTTP action 复用）。
  * @param {string} line 形如 "/ec status"、"gate G2"、"memory init"
@@ -16,11 +17,11 @@ import { resolveAllowedRoot, ecError } from './gate-service.js'
  * @returns {object} 结构化结果（含 ok / 各子命令字段）
  */
 export function runEcCommand(line, projectRoot, opts = {}) {
-  // 安全边界：与 ec_stage/ec_artifact/HTTP 一致，projectRoot 须落在 EC_ALLOWED_ROOTS 内。
-  // 传 undefined 时用 cwd（cwd 默认在允许根内）；越界返回领域错误，不读也不写。
+  // projectRoot 是文本标签（本机或远端路径均可）：只做规范化，不做白名单/存在性校验。
+  // 传 undefined 时用 cwd；空标签返回领域错误，不读也不写。
   const root = resolveAllowedRoot(projectRoot ?? process.cwd())
   if (!root) {
-    return { ok: false, error: ecError('PATH_OUT_OF_ROOT', 'projectRoot 不在允许根内（EC_ALLOWED_ROOTS）', { projectRoot }) }
+    return { ok: false, error: ecError('INVALID_INPUT', 'projectRoot 是空标签（须非空字符串）', { projectRoot }) }
   }
   const parts = String(line ?? '').trim().split(/\s+/).filter(Boolean)
   const sub = (parts[0] === '/ec' ? parts[1] : parts[0]) ?? 'status'

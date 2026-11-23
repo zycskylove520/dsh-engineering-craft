@@ -302,3 +302,10 @@ PROBE DONE / PROBE2 DONE
 - 临时脚本 `_ec_parallel_probe.mjs` / `_ec_parallel_probe2.mjs` 跑完即删（实测 `ls _ec_*` → `NO_TEMP_FILES_LEFT`），仓库无残留。
 - 纪律：本节只追加不重写；实现代码零改动；未采信 lead/研发岗自述，全部结论以独立复跑与临时脚本真实输出为准。
 - **追加节结论**：形态 B 三道门与形态 A 兼容语义**通过独立验证（实测）**；72/72 全绿；边界探针 9 项断言全过；发现 2 条 low findings，交 lead 裁决，未改实现。
+
+### 9.6 追加复跑（2026-11-23 · projectRoot 去白名单）
+
+- **改动**：`resolveAllowedRoot` 从白名单校验改为文本标签规范化；新增 `ec-path.js` 按标签形态选 path 模块；gate-service/artifacts/memory/metrics/tools/command/index 的路径调用点同步。历史 §4.1「PATH_OUT_OF_ROOT = 白名单越界」记录保留，语义已变更为「交接物路径越出 projectRoot 标签的防 .. 穿越」，宿主白名单校验已移除。
+- **复跑结果（实测）**：`node --test tests/*.test.js` → **80/80 全绿**（tests 80 / pass 80 / fail 0）。新增断言：远端 POSIX 标签 `/remote/...` 原样保留不被改写盘符、工作区外路径作为标签放行、空标签仍拒、`statePathOf` 落在 `<标签>/.engineering-craft/state.json`。
+- **端到端探针（实测）**：6 个入口（ec_stage query/next-role、ec_artifact validate、ec_memory query、ec_gate_metrics list、runEcCommand status）传 `/remote/path/to/Project` 全部 `ok=true`，零 `PATH_OUT_OF_ROOT`。
+- **HMR 边界（已知）**：host 工具模块不热重载，重启 DSH 前运行中的 `ec_stage` 仍报旧错误，属预期；改动已在磁盘与符号链接源（D:\Project\dsh-engineering-craft）确认。

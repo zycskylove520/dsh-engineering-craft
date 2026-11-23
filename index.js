@@ -271,13 +271,13 @@ export function apply(ctx, config) {
     }
   }
 
-  /** 统一项目根校验：须落在显式允许根集合内（EC_ALLOWED_ROOTS，缺省 cwd），与工具层同策略。 */
+  /** 统一项目根解析：纯文本标签规范化，不做白名单/存在性校验。HTTP 层缺参不静默回落到宿主 cwd（会绑错工程），由各路由显式报错。 */
   const resolveRoot = (input) => resolveAllowedRoot(input)
 
   /** POST action 的业务分发：与 /ec 命令共用门逻辑，人拍板动作保持用户专属。 */
   const runAction = (body) => {
     const root = resolveRoot(body.projectRoot)
-    if (!root) return { ok: false, error: { code: 'PATH_OUT_OF_ROOT', message: 'projectRoot 非法' } }
+    if (!root) return { ok: false, error: { code: 'INVALID_INPUT', message: 'projectRoot 是空标签' } }
     if (body.kind === 'next-role') return { ok: true, ...ecGate.nextRole(root) }
     if (body.kind === 'metrics') return metricsAction({ action: 'list', limit: body.limit ?? 20, projectRoot: root })
     if (body.kind === 'gate' || body.kind === 'confirm-gate') {
@@ -363,7 +363,7 @@ export function apply(ctx, config) {
         if (req.method === 'GET' && url.pathname === '/api/engineering-craft/state') {
           const input = url.searchParams.get('projectRoot')
           const root = resolveRoot(input)
-          if (!root) return sendJson(res, 400, { ok: false, error: { code: 'PATH_OUT_OF_ROOT', message: 'projectRoot 非法或未传' } })
+          if (!root) return sendJson(res, 400, { ok: false, error: { code: 'INVALID_INPUT', message: 'projectRoot 是空标签或未传' } })
           const state = ecGate.read(root)
           const next = ecGate.nextRole(root)
           return sendJson(res, 200, {

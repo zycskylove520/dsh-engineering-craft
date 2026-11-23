@@ -1,11 +1,11 @@
 /**
  * memory.js —— .project_memory/ 规范层的 init/write/query（CONTRACT §5.3）。
  * 只存规范不写会话流水；目录名冲突时退到 .project_memory_engineer/ 并打标记（ADR §8）。
- * 写入内容必须含来源与日期指针（practices.md）；路径做项目根白名单校验。
+ * 写入内容必须含来源与日期指针（practices.md）；路径做 projectRoot 标签内的防 .. 穿越校验。
  */
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
 import { ecError, safePathWithin } from './gate-service.js'
+import { dirnameFor, joinFor } from './ec-path.js'
 
 /** 规范层目录名。 */
 export const MEMORY_DIR_NAME = '.project_memory'
@@ -22,15 +22,15 @@ const LAYERS = ['index', 'architecture', 'conventions', 'project', 'open-questio
  */
 export function memoryPathOf(projectRoot, layer) {
   const root = safePathWithin(projectRoot, projectRoot) || projectRoot
-  let dir = join(root, MEMORY_DIR_NAME)
+  let dir = joinFor(root, MEMORY_DIR_NAME)
   let fallback = false
   // 同名普通文件占住 .project_memory 时才退到备选目录；目录存在/不存在都按正常处理。
   if (existsSync(dir) && !statSync(dir).isDirectory()) {
-    dir = join(root, MEMORY_FALLBACK_DIR_NAME)
+    dir = joinFor(root, MEMORY_FALLBACK_DIR_NAME)
     fallback = true
   }
   const file = layer === 'index' ? 'INDEX.md' : `${layer}.md`
-  const marker = join(dir, '.engineering-craft-marker')
+  const marker = joinFor(dir, '.engineering-craft-marker')
   if (fallback && !existsSync(marker)) {
     // 降级目录此时尚未创建：先建目录再写 marker，否则 ENOENT 原生异常穿透工具层（BUG-02）。
     // marker 只是标记，写入失败不应阻断正式操作——容错，由后续 init/write 的 STORAGE_UNAVAILABLE 覆盖真实落盘失败。
@@ -39,7 +39,7 @@ export function memoryPathOf(projectRoot, layer) {
       writeFileSync(marker, '# 本目录是 .project_memory 的备选（ADR §8 名字冲突降级）\n', 'utf8')
     } catch { /* marker 容错：正式落盘由 init/write 各自处理并报领域错误 */ }
   }
-  return { path: join(dir, file), dir, fallback }
+  return { path: joinFor(dir, file), dir, fallback }
 }
 
 /**
@@ -64,7 +64,7 @@ export function memoryAction(args) {
   const projectRoot = args.projectRoot ?? process.cwd()
   const rootSafe = safePathWithin(projectRoot, projectRoot)
   if (!rootSafe) {
-    return { ok: false, error: ecError('PATH_OUT_OF_ROOT', `项目根非法：${projectRoot}`, { projectRoot }) }
+    return { ok: false, error: ecError('INVALID_INPUT', `projectRoot 是空标签：${projectRoot}`, { projectRoot }) }
   }
   const layer = String(args.layer ?? 'index')
   if (!LAYERS.includes(layer)) {
@@ -77,10 +77,10 @@ export function memoryAction(args) {
   }
 
   if (action === 'init') {
-    const dirs = [target.dir, join(target.dir, 'architecture'), join(target.dir, 'conventions'), join(target.dir, 'project')]
+    const dirs = [target.dir, joinFor(target.dir, 'architecture'), joinFor(target.dir, 'conventions'), joinFor(target.dir, 'project')]
     try {
       for (const d of dirs) mkdirSync(d, { recursive: true })
-      const indexPath = join(target.dir, 'INDEX.md')
+      const indexPath = joinFor(target.dir, 'INDEX.md')
       if (!existsSync(indexPath)) {
         writeFileSync(indexPath, '# 工程记忆 INDEX\n\n> 只存规范，不存会话流水。\n\n- 架构：architecture/\n- 约定：conventions/\n- 未决：open-questions.md\n', 'utf8')
       }
@@ -98,7 +98,7 @@ export function memoryAction(args) {
       return { ok: false, error: ecError('INVALID_INPUT', 'write 的 content 必须含"来源"与 YYYY-MM-DD 日期指针', { layer }) }
     }
     try {
-      mkdirSync(dirname(safe), { recursive: true })
+      mkdirSync(dirnameFor(safe), { recursive: true })
       writeFileSync(safe, args.content.trimEnd() + '\n', 'utf8')
       return { ok: true, action, path: safe, status: 'written' }
     } catch (e) {

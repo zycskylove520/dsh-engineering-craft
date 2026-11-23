@@ -144,7 +144,7 @@ export default class EcGate {
    * 更新交接物路径指针或 PLAN 单元状态。
    * @param {Session} session 会话
    * @param {{artifact?: ArtifactKey, path?: string, planId?: string, planStatus?: PlanStatus}} patch
-   * @returns {Result<EcState, EcError>} 路径须落在允许根内，否则 error.code=PATH_OUT_OF_ROOT
+   * @returns {Result<EcState, EcError>} 路径须落在 projectRoot 标签内（防 .. 穿越），否则 error.code=PATH_OUT_OF_ROOT
    */
   update(session, patch) { /* 留白 */ }
 
@@ -277,7 +277,7 @@ EcState（投影缓存，stateVersion=1）──handle.stateOf()──► EcGate
  *   'NOT_USER_CONFIRMED'    // 需人拍板但无确认（details.gateId）
  *   'NO_EVIDENCE'           // G3 缺真实命令输出证据
  *   'INVALID_INPUT'         // 入参不合 schema / 路径非法
- *   'PATH_OUT_OF_ROOT'      // 路径越出允许根（防穿越）
+ *   'PATH_OUT_OF_ROOT'      // 路径越出 projectRoot 标签（防 .. 穿越；不再是宿主白名单校验）
  *   'ARTIFACT_SCHEMA_FAIL'  // 交接物结构校验失败（details.artifact / missingFields）
  *   'CONFIG_INVALID'        // Config 违约（不可恢复，throw）
  *   'STORAGE_UNAVAILABLE'   // storage service/profile 不可用
@@ -344,14 +344,14 @@ Config 保存走 `ctx.fiber.entry` + `ctx.get('configEditor').edit(entry, curren
              "description":"query=只读状态；confirm-gate=记录人确认/证据；next-role=返回下一岗位或形态B多单元"},
     "gate": {"type":"string","enum":["G1","G2","G3"],"description":"confirm-gate 时必填"},
     "evidence": {"type":"string","description":"G3 confirm-gate 时必填：命令+输出摘要（非全文）"},
-    "projectRoot": {"type":"string","description":"项目根绝对路径，缺省用进程 cwd；须落在允许根内"},
+    "projectRoot": {"type":"string","description":"项目根路径标签（本机或远端均可，如 /remote/path/to/Project）；不做存在性/白名单校验，缺省用进程 cwd；空标签返回 INVALID_INPUT"},
     "capabilities": {"type":"object","properties":{"subagent":{"type":"boolean"}},"additionalProperties":false,"description":"形态B能力门，默认开启"},
     "thresholds": {"type":"object","properties":{"minFilesForParallel":{"type":"integer"}},"additionalProperties":false,"description":"形态B收益门，最小并行单元数，默认2"}
   },
   "required": ["mode"], "additionalProperties": false
 }
 ```
-- **execute 返回**（默认 textOutput 渲染）：`{ok:true, stage, gates, gateResults, nextRole, mode, parallelRoles, missingArtifacts, blockedBy}` 普通对象（形态 A 的 `parallelRoles` 为空数组）；拒绝时 `{ok:false, error:{code:'GATE_NOT_PASSED'|'NOT_USER_CONFIRMED'|'NO_EVIDENCE'|'PATH_OUT_OF_ROOT', details}}`（不是 `isError:true` 的 ToolResult）。`confirm-gate` 的 G1/G2 只接受"用户已在本轮确认"的上下文标记，agent 不得自报确认（ADR-003）。形态 B 三道门见 ADR-PARALLEL.md。
+- **execute 返回**（默认 textOutput 渲染）：`{ok:true, stage, gates, gateResults, nextRole, mode, parallelRoles, missingArtifacts, blockedBy}` 普通对象（形态 A 的 `parallelRoles` 为空数组）；拒绝时 `{ok:false, error:{code:'INVALID_INPUT'|'NOT_USER_CONFIRMED'|'MISSING_ARTIFACT'|'NO_EVIDENCE'|'STORAGE_UNAVAILABLE', details}}`（不是 `isError:true` 的 ToolResult；空 projectRoot 归 `INVALID_INPUT`，`PATH_OUT_OF_ROOT` 在本工具不再产生）。`confirm-gate` 的 G1/G2 只接受"用户已在本轮确认"的上下文标记，agent 不得自报确认（ADR-003）。形态 B 三道门见 ADR-PARALLEL.md。
 
 ### 5.2 `ec_artifact`
 
@@ -362,8 +362,8 @@ Config 保存走 `ctx.fiber.entry` + `ctx.get('configEditor').edit(entry, curren
   "type": "object",
   "properties": {
     "action": {"type":"string","enum":["create","validate"],"description":"create=写模板；validate=只读校验"},
-    "kind": {"type":"string","enum":["prd","adr","contract","plan","brief","release"]},
-    "path": {"type":"string","description":"目标绝对路径；须落在允许根内（PATH_OUT_OF_ROOT 防穿越）"}
+    "kind": {"type":"string","enum":["prd","adr","contract","plan","brief","release","testReport","findings"]},
+    "path": {"type":"string","description":"目标路径；须落在 projectRoot 标签内（防 .. 穿越，越界返回 PATH_OUT_OF_ROOT）"}
   },
   "required": ["action","kind","path"], "additionalProperties": false
 }
@@ -379,9 +379,9 @@ Config 保存走 `ctx.fiber.entry` + `ctx.get('configEditor').edit(entry, curren
   "type": "object",
   "properties": {
     "action": {"type":"string","enum":["init","write","query"],"description":"init=建骨架；write=写规范带来源+日期；query=按需读"},
-    "projectRoot": {"type":"string","description":"项目根绝对路径；缺省由 workingDirectory.service 解析（[待实测] OQ-5）"},
-    "layer": {"type":"string","enum":["architecture","conventions","project","open-questions"],
-              "description":"write/query 的目标层（INDEX.md 单独可用 'index'）"},
+    "projectRoot": {"type":"string","description":"项目根路径标签（本机或远端均可，如 /remote/path/to/Project）；不做存在性校验，缺省用当前工作目录"},
+    "layer": {"type":"string","enum":["architecture","conventions","project","open-questions","index"],
+              "description":"write/query 的目标层（index 指 INDEX.md）"},
     "content": {"type":"string","description":"write 时正文；须含来源与日期指针"},
     "query": {"type":"string","description":"query 时的检索线索（不倾倒全目录）"}
   },
@@ -518,3 +518,21 @@ ec-product → ec-architect → ec-developer → ec-tester → ec-reviewer → e
 - **先解决 `open-questions.md` 中仍标 `[待实测]` 的项**（sessionProjections.wire.view、storage domain、slot props、ctx.remote 路径、workingDirectory 解析）再写对应模块；不得猜 API。OQ-2/OQ-4/OQ-9 已由实测澄清（见 §2.3/§4.2/§1 与 open-questions「已实测澄清」区）：工具用 `defineTool({name,description,parameters,output,execute})` 且容错加载、Config 用 schemastery `z.object` + `.extra('volatile',true)`、打包为单 host row + `dsh.client` 声明。
 - **每个公开导出保留本文 TSDoc**；`rules.js` 保持纯函数、先红后绿单测（`node:test`）。
 - **本契约不改 ADR/PRD/PLAN**（上游交接物）；有冲突回架构岗。
+
+---
+
+## 11. 变更记录
+
+- **2026-11-23 · projectRoot 语义从「宿主白名单路径」改为「用户声明的文本标签」**（主人定，支持远程工程）：
+  - `resolveAllowedRoot()` 由「校验是否落在 `EC_ALLOWED_ROOTS`/cwd/tmpdir/工作区白名单内」改为「纯文本标签规范化」——绝对路径标签（含 POSIX `/` 开头与 Windows 盘符）原样保留，只有空/非字符串返回 null（错误码由 `PATH_OUT_OF_ROOT` 改为 `INVALID_INPUT`）。
+  - 新增 `ec-path.js`：POSIX 风格标签走 `node:path/posix`，其余走平台原生模块；保证远端标签 `/remote/...` 在 Windows 宿主上不被改写成盘符路径。所有路径 join/dirname/resolve/isAbsolute 改用该助手（gate-service / artifacts / memory / metrics）。
+  - **解耦边界**：插件不再判断工程在哪、是否存在、是不是远程——由用户/宿主记忆与 SSH 工具负责；状态仍落 `<projectRoot>/.engineering-craft/`、记忆落 `<projectRoot>/.project_memory/`（远端标签需该路径在宿主可写或由用户同步）。
+  - `safePathWithin` 的 `PATH_OUT_OF_ROOT` 语义保留，但仅指「交接物路径越出 projectRoot 标签」的防 `..` 穿越，不再是宿主白名单。
+  - 测试：`boundary.test.js` 重写允许根用例为标签语义，新增远端 POSIX 标签原样保留 / statePathOf 落在标签目录等断言；全套 80/80 绿。
+
+- **2026-11-23（同日）· 改动后全面审查的修复**（4 只读审查 agent 并行 + lead 逐条核实原文，不采信自述）：
+  - **安全 BUG（2 agent 独立实证）**：POSIX 标签 + Windows 宿主下 `safePathWithin` 用 posix 语义校验，`..\evil.md` 的 `..` 不被折叠而放行，但 fs 落盘按 win32 解析到根外（实测写到 `D:\evil.md`）。修复：containment 校验一律用 `nativePath`（宿主 fs 语义）折叠 `..` 与 `\` 后判断，返回值仍按标签形态构造（远端标签原样保留）。新增 `ec-path.js` 导出 `nativePath` 专供安全校验。
+  - **功能 BUG**：`projectRoot` 为文件系统根（`/` 或 `C:\`）时 `r + sep` 产生 `//` 双分隔符，拒绝所有合法子路径。修复：前缀按 `endsWith(sep)` 去尾。
+  - **隐私漏网**：上一轮脱敏只扫正斜杠形态，遗漏反斜杠形态的内部路径示例（`ec-path.js`、`CONTRACT §11` 两处）——已全库清除，隐私复扫零命中。
+  - **一致性**：ec_memory/ec_gate_metrics 的能力层空标签码 `PATH_OUT_OF_ROOT` → `INVALID_INPUT`，ec_artifact 补空标签检查；HTTP `/state` 缺参不再静默回落 host cwd（改为 400）；CONTRACT §5.1/§5.3 schema、错误码枚举、§2.2 update 注释同步；4 源码顶部"白名单"过时注释清理；UNC `//` 标签不再被 posix 折叠。
+  - **验证**：新增 8 条安全回归测试（反斜杠穿越 / 根路径 / 跨 scheme / 空标签 / UNC / 标签形态保留），全套 **88/88 绿**；端到端 6 入口 ok=true、反斜杠穿越经真实工具层返回 `PATH_OUT_OF_ROOT`、空标签返回 `INVALID_INPUT`。

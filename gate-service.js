@@ -1,12 +1,13 @@
 /**
  * gate-service.js —— EcState 的唯一所有者（CONTRACT §2.2，按架构收敛改为文件落盘）。
  * 门状态存 <projectRoot>/.engineering-craft/state.json（stateVersion=1），跨会话按项目连续；
- * 所有写操作集中在本模块，工具/命令只转发。路径统一规范化并做项目根白名单校验。
+ * 所有写操作集中在本模块，工具/命令只转发。路径按标签形态规范化，并做 projectRoot 内的防 .. 穿越校验。
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { isAbsolute, join, normalize, resolve, sep } from 'node:path'
-import { tmpdir, homedir } from 'node:os'
+import { join, normalize, resolve } from 'node:path'
+import { homedir } from 'node:os'
 import { checkGate, nextRole, gatesBetween, DEFAULT_PIPELINE } from './rules.js'
+import { isAbsoluteFor, joinFor, dirnameFor, resolveFor, nativePath } from './ec-path.js'
 
 /** 状态文件名与目录名（相对 projectRoot）。 */
 export const STATE_DIR_NAME = '.engineering-craft'
@@ -85,28 +86,42 @@ const fail = (error) => ({ ok: false, error })
  */
 export function normalizeProjectRoot(input) {
   const raw = typeof input === 'string' && input.trim() ? input.trim() : process.cwd()
-  return resolve(normalize(raw))
+  return resolveFor(raw)
 }
 
 /**
- * 路径安全：校验目标绝对路径是否落在项目根内（防 .. / 软链前缀穿越）。
- * @param {string} target 目标绝对路径
- * @param {string} root 允许根（绝对路径）
- * @returns {string|null} 合法返回规范绝对路径，否则 null
+ * 路径安全：校验 target 是否落在 projectRoot 标签内（防 .. / 异 scheme 分隔符 / 兄弟目录前缀穿越）。
+ *
+ * 【为何用宿主 fs 语义校验】fs 落盘时 Windows 会把 /remote/... 当 <当前盘>:\remote\...、
+ * 把 \ 当分隔符并折叠 ..。若用 POSIX 标签语义校验，'..\evil.md' 不被折叠会误判为"在根内"，
+ * 但落盘却跑到根外（已实证的安全漏洞）。故 containment 一律用 nativePath（宿主 fs）语义折叠后判断；
+ * 返回值仍按标签形态 resolveFor 构造，保证远端标签 /remote/... 在 state.json 里原样保留。
+ * 另：root 为文件系统根（/ 或 C:\）时前缀需去尾分隔符，否则 '//' 双分隔符会拒绝所有子路径。
+ *
+ * @param {string} target 目标路径（绝对或相对 root）
+ * @param {string} root projectRoot 标签（绝对路径）
+ * @returns {string|null} 合法返回标签形态的规范路径，否则 null
  */
 export function safePathWithin(target, root) {
   if (typeof target !== 'string' || !target.trim()) return null
-  const r = resolve(normalize(root))
-  const t = resolve(normalize(isAbsolute(target) ? target : join(r, target)))
-  if (t === r || t.startsWith(r + sep)) return t
-  return null
+  if (typeof root !== 'string' || !root.trim()) return null
+  // 1) 安全校验：按宿主 fs 语义解析（折叠 \ 与 ..、识别盘符/UNC 交叉），杜绝落盘越界。
+  const rootNative = nativePath.resolve(nativePath.normalize(root))
+  const targetNative = nativePath.isAbsolute(target)
+    ? nativePath.resolve(nativePath.normalize(target))
+    : nativePath.resolve(rootNative, target)
+  const prefix = rootNative.endsWith(nativePath.sep) ? rootNative : rootNative + nativePath.sep
+  const contained = targetNative === rootNative || targetNative.startsWith(prefix)
+  if (!contained) return null
+  // 2) 返回值：按标签形态构造，保持 /remote/... 原样（不写盘符），与 projectRoot 标签一致。
+  const rLabel = resolveFor(root)
+  return isAbsoluteFor(target) ? resolveFor(target) : resolveFor(joinFor(rLabel, target))
 }
 
 /**
- * 读 DSH 已登记的工作区目录作为默认允许根候选。
- * 宿主进程 cwd 是 profile 目录、与会话工作目录（用户实际项目）不同；若缺省只允许 cwd，
- * 工具在用户自己的项目里会被 PATH_OUT_OF_ROOT 拒绝（"开始工程先确认当前会话目录"规则失效）。
- * 工作区来自 ~/.dsh/storages/workspace.json（DSH workspace service 的稳定落盘），纯读、容错。
+ * 读 DSH 已登记的工作区目录（历史保留工具函数）。
+ * 注：projectRoot 改为文本标签后，本函数已无生产调用点（白名单校验移除）；保留供诊断/未来用途。
+ * 数据来自 ~/.dsh/storages/workspace.json（DSH workspace service 的稳定落盘），纯读、容错。
  * @returns {string[]} 工作区绝对路径数组；读不到返回 []
  */
 export function dshWorkspaceRoots() {
@@ -127,27 +142,32 @@ export function dshWorkspaceRoots() {
 }
 
 /**
- * 把调用方给的 projectRoot 解析到显式允许根集合内（安全边界）。
- * 允许根来自环境变量 EC_ALLOWED_ROOTS（分号分隔的绝对路径）；缺省为
- * process.cwd()（宿主 profile）+ 系统临时目录 + DSH 已登记的工作区目录。
- * 不能用 input 自身当允许根（那样恒真、等于无校验）。
- * @param {string} input 调用方给的项目根
- * @returns {string|null} 落在允许根内的规范绝对路径，否则 null
+ * projectRoot 解析（无状态校验的纯文本标签）。
+ *
+ * 设计变更（2026-11-23）：projectRoot 从「被 hook 校验的真实路径」降级为
+ * 「用户声明的工程目录文本标签」——可以是本机路径，也可以是远端路径
+ * （如 /remote/path/to/Project）。插件不再做白名单/存在性校验：
+ *   - 工程在哪、是不是远程、要不要挂载，由用户/宿主记忆与 SSH 工具负责；
+ *   - 本插件只把标签规范化后原样用于落盘（<标签>/.engineering-craft/），
+ *     做到与宿主环境干净解耦。
+ * EC_ALLOWED_ROOTS 现仅作可选的「相对标签基准目录」：设了它时，相对标签
+ * 按第一个基准目录解析；不设则相对标签按 process.cwd() 解析。绝对路径标签
+ * （含 POSIX / 开头与 Windows 盘符）永远原样保留，不受任何基准影响。
+ *
+ * @param {string} input 调用方给的项目根标签
+ * @returns {string|null} 规范化后的标签；仅空/非字符串返回 null
  */
 export function resolveAllowedRoot(input) {
   if (typeof input !== 'string' || !input.trim()) return null
+  const raw = input.trim()
+  // POSIX 绝对标签（远端路径常见形态）→ 按 posix 规范化，原样保留 / 开头。
+  if (isAbsoluteFor(raw)) return resolveFor(raw)
+  // 相对标签：按可选基准解析（兼容旧 EC_ALLOWED_ROOTS 的相对基准语义）。
   const configured = process.env.EC_ALLOWED_ROOTS
-  // 缺省允许：宿主 cwd + 系统临时目录（测试冒烟）+ DSH 工作区（用户实际项目）。
-  // 生产若需收紧，设 EC_ALLOWED_ROOTS 显式覆盖（此时不再自动加入工作区）。
-  const roots = (configured && configured.trim())
-    ? configured.split(';').map((s) => s.trim()).filter(Boolean)
-    : [process.cwd(), tmpdir(), ...dshWorkspaceRoots()]
-  const candidate = resolve(normalize(isAbsolute(input) ? input : join(process.cwd(), input)))
-  for (const root of roots) {
-    const allowed = safePathWithin(candidate, root)
-    if (allowed) return allowed
-  }
-  return null
+  const base = (configured && configured.trim())
+    ? configured.split(';').map((s) => s.trim()).filter(Boolean)[0]
+    : process.cwd()
+  return resolveFor(base ? joinFor(resolveFor(base), raw) : raw)
 }
 
 /**
@@ -156,7 +176,8 @@ export function resolveAllowedRoot(input) {
  * @returns {string} state.json 绝对路径
  */
 export function statePathOf(projectRoot) {
-  return join(normalizeProjectRoot(projectRoot), STATE_DIR_NAME, STATE_FILE_NAME)
+  const root = normalizeProjectRoot(projectRoot)
+  return joinFor(root, STATE_DIR_NAME, STATE_FILE_NAME)
 }
 
 /**
@@ -230,7 +251,7 @@ export default class EcGate {
    */
   write(state) {
     const file = statePathOf(state.projectRoot)
-    mkdirSync(join(state.projectRoot, STATE_DIR_NAME), { recursive: true })
+    mkdirSync(joinFor(state.projectRoot, STATE_DIR_NAME), { recursive: true })
     writeFileSync(file, JSON.stringify(state, null, 2) + '\n', 'utf8')
     return file
   }
@@ -324,7 +345,7 @@ export default class EcGate {
   }
 
   /**
-   * 更新交接物路径指针或 PLAN 单元状态（路径须落在允许根内）。
+   * 更新交接物路径指针或 PLAN 单元状态（路径须落在 projectRoot 标签内，防 .. 穿越）。
    * @param {string} projectRoot 项目根
    * @param {{artifact?: string, path?: string, planId?: string, planStatus?: string}} patch 变更
    * @returns {{ok: true, value: object}|{ok: false, error: object}} Result<EcState, EcError>

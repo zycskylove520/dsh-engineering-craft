@@ -1,13 +1,12 @@
 /**
  * artifacts.js —— 交接物模板落盘与结构校验（CONTRACT §8）。
- * 只写模板文件本身，不碰其他文件；返回路径指针，不回传正文。路径做项目根白名单校验。
+ * 只写模板文件本身，不碰其他文件；返回路径指针，不回传正文。路径做 projectRoot 标签内的防 .. 穿越校验。
  * 落盘/校验成功后按 CONTRACT §9 把路径指针登记进 EcState；登记回调由调用方注入，
  * 避免反向 import tools.js 造成 ESM 循环（artifacts ← tools 的既有依赖方向不变）。
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
-import { mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { ecError, safePathWithin } from './gate-service.js'
+import { dirnameFor } from './ec-path.js'
 
 /** ArtifactKey → 文件名（CONTRACT §8）。 */
 export const ARTIFACT_FILES = Object.freeze({
@@ -67,6 +66,9 @@ export function artifactAction(args) {
     return { ok: false, error: ecError('INVALID_INPUT', `未知交接物类型 ${kind}`, { kind }) }
   }
   const root = args.projectRoot ?? process.cwd()
+  if (typeof root !== 'string' || !root.trim()) {
+    return { ok: false, error: ecError('INVALID_INPUT', 'projectRoot 是空标签', { projectRoot: root }) }
+  }
   const safe = safePathWithin(args.path, root)
   if (!safe) {
     return { ok: false, error: ecError('PATH_OUT_OF_ROOT', `交接物路径越出项目根：${args.path}`, { path: args.path, root }) }
@@ -78,7 +80,7 @@ export function artifactAction(args) {
       return { ok: true, kind, path: safe, status: 'exists', missingFields: [] }
     }
     try {
-      mkdirSync(dirname(safe), { recursive: true })
+      mkdirSync(dirnameFor(safe), { recursive: true })
       writeFileSync(safe, TEMPLATES[kind], 'utf8')
     } catch (e) {
       return { ok: false, error: ecError('STORAGE_UNAVAILABLE', `模板落盘失败：${e?.message ?? e}`, { path: safe }) }

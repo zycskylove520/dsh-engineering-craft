@@ -14,6 +14,7 @@
     "index.js",
     "client.js",
     "gate-service.js",
+    "ec-path.js",
     "rules.js",
     "tools.js",
     "command.js",
@@ -30,7 +31,7 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "check": "node --check index.js && node --check client.js && node --check gate-service.js && node --check rules.js && node --check tools.js && node --check command.js && node --check artifacts.js && node --check memory.js && node --check metrics.js",
+    "check": "node --check index.js && node --check client.js && node --check gate-service.js && node --check ec-path.js && node --check rules.js && node --check tools.js && node --check command.js && node --check artifacts.js && node --check memory.js && node --check metrics.js",
     "test": "node --test tests/*.test.js"
   },
   "dsh": {
