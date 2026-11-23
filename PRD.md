@@ -27,7 +27,7 @@
 - P5：端到端验证与交付
 
 ## 5. 验收标准（可判定）
-- [ ] AC1 插件管理器可见 `@local/engineering-craft-suite`，无 metadata/icon/detail 诊断。
+- [ ] AC1 插件管理器可见 `@local/dsh-engineering-craft`，无 metadata/icon/detail 诊断。
 - [ ] AC2 `ec_stage` 能查询阶段与门；G1 未过时拒绝进入编码动作。
 - [ ] AC3 `ec_stage(mode:'next-role')` 按 product→architect→developer→tester→reviewer→ops 返回下一岗位，且仅在上游交接物存在时放行。
 - [ ] AC4 `ec_artifact` 生成 PRD/ADR/CONTRACT/PLAN/Brief/Release 模板并校验结构。

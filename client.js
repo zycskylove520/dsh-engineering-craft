@@ -1,11 +1,11 @@
 /**
- * client.js —— @local/engineering-craft-suite 的 Client 半（由 package.json dsh.client 自动挂载）。
+ * client.js —— @local/dsh-engineering-craft 的 Client 半（由 package.json dsh.client 自动挂载）。
  * 由 window.__ModuleLoader__.load 懒注册：main keyed 面板、header.actions 入口、shell.overlay 确认人拍板卡。
  * React 从 require('react') 取；样式只用 --dsw-alias-* theme token；数据走 fetch('/api/engineering-craft/*')。
  * 文案走 DSH 自带系统插件 @deepseek-ai/dsh-client-locale 的命名空间字典（zh/en），切语言无需 reload。
  */
 window.__ModuleLoader__.load({
-  id: '@local/engineering-craft-suite',
+  id: '@local/dsh-engineering-craft',
 
   /**
    * Client 懒工厂（无副作用）；React 与 locale 都从浏览器模块表取，禁止自带。
@@ -17,7 +17,7 @@ window.__ModuleLoader__.load({
     const { useState, useEffect, useCallback, useSyncExternalStore } = React
 
     // 本插件的命名空间字典（zh/en 都齐全，符合 dsh-client-locale 的 register 契约）。
-    const NS = '@local/engineering-craft-suite'
+    const NS = '@local/dsh-engineering-craft'
     const DICT = {
       zh: {
         'panel.title': '工程流程',

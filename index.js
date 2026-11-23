@@ -1,5 +1,5 @@
 /**
- * index.js —— @local/engineering-craft-suite 的 host 半入口（单 row，统一注册全部 host 能力）。
+ * index.js —— @local/dsh-engineering-craft 的 host 半入口（单 row，统一注册全部 host 能力）。
  * ⭐ optional peer 容错：@deepseek-ai/dsh-tools 的 defineTool 与 schemastery 的 z 都从宿主树找，
  *    找不到就本地兜底 / Config=undefined，绝不因一个 import 让整条插件不激活（证据：dsh-bili-scroll）。
  * 门状态存 <projectRoot>/.engineering-craft/state.json；Client 经 /api/engineering-craft/* 读写。

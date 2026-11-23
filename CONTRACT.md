@@ -21,9 +21,9 @@
 
 ## 1. 模块边界
 
-单 bundle `@local/engineering-craft-suite`，**一个 host plugin row + package.json 的 `dsh.client` 声明挂载 client 半** `[实测纠正]`（原"4 row ecGate/ecTools/ecPanel/ecCommand"是早期假设，被实测推翻；证据 dsh-windows-mcp `cordis.patch.yml`、dsh-ssh/dsh-meme patch）。
+单 bundle `@local/dsh-engineering-craft`，**一个 host plugin row + package.json 的 `dsh.client` 声明挂载 client 半** `[实测纠正]`（原"4 row ecGate/ecTools/ecPanel/ecCommand"是早期假设，被实测推翻；证据 dsh-windows-mcp `cordis.patch.yml`、dsh-ssh/dsh-meme patch）。
 
-- `cordis.patch.yml` 只插一行：`id: '@local/engineering-craft-suite'`, `name: '@local/engineering-craft-suite'`（= 包名；loader import 该包的 exports `"."`，即 `index.js`）。**row id 定为包名本身**，使 loader entry id 与 Config namespace 一致（bili 教训：export Config 时两者必须相等，见 §4.2）。
+- `cordis.patch.yml` 只插一行：`id: '@local/dsh-engineering-craft'`, `name: '@local/dsh-engineering-craft'`（= 包名；loader import 该包的 exports `"."`，即 `index.js`）。**row id 定为包名本身**，使 loader entry id 与 Config namespace 一致（bili 教训：export Config 时两者必须相等，见 §4.2）。
 - `index.js` 的单一 `apply(ctx, config)` 内统一注册全部 host 能力：投影（ecGate）、4 工具（ec_stage/ec_artifact/ec_memory/ec_gate_metrics）、`/ec` 命令、`systemPrompt.section()`。
 - client 半由 `package.json` 的 `"dsh": {"client": {"platform":"web","immediately":true,"inject":[...]}, "bundle":{"patch":"./cordis.patch.yml"}}` 自动挂载 `exports["./client"]`，`client.js` 内用 `window.__ModuleLoader__.load` 注册 slot；**不单独占 row**。
 
@@ -212,7 +212,7 @@ ctx.tools.register(defineTool({ name, description, parameters, output, execute }
 ```js
 // 模板约定：[实测 asar templates/decoration/client.js]
 window.__ModuleLoader__.load({
-  id: '@local/engineering-craft-suite',
+  id: '@local/dsh-engineering-craft',
   /** @param {(name: string) => any} require 浏览器模块表；React 从 require('react') 取，禁止自带 */
   factory(require) {
     const React = require('react');
@@ -292,7 +292,7 @@ EcState（投影缓存，stateVersion=1）──handle.stateOf()──► EcGate
 
 - `export const Config = z.object({...})`，`z` 来自 schemastery（optional peer）；schemastery 彻底取不到时 `Config = undefined`，**插件照常加载，只是设置页降级**。
 - **每个要被设置页写的字段必须 `.extra('volatile', true)`**：DSH 的 settings 层只认 volatile 字段（`volatileForm(schema)`），否则写设置抛 "has no volatile fields"。
-- **loader entry id 必须等于 namespace 名**（row id 即包名 ` '@local/engineering-craft-suite'`，见 §1）+ 本模块导出 `Config`，三者齐备设置页才可写。
+- **loader entry id 必须等于 namespace 名**（row id 即包名 ` '@local/dsh-engineering-craft'`，见 §1）+ 本模块导出 `Config`，三者齐备设置页才可写。
 - schema 校验范围要宽松：范围约束（如阈值上下限）放在**写/读时钳制**，不要写成 `.min()/.max()` 等硬校验——校验不过会让 cordis 拒收 entry ⇒ 整条插件不激活（bili `commentPerRound` 的教训）。
 
 默认值来自 ADR §4.2；`minFilesForParallel` 是**形态 B 的收益门**（语义为最小并行单元数，见 ADR-PARALLEL §取舍与风险；默认 2），`minUnitsForWorkflow` 为预留配置项（当前未使用）。本套件恒走多 agent，无 single/workflow 路由。

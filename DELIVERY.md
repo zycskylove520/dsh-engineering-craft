@@ -5,7 +5,7 @@
 
 ## 做了什么
 
-把 engineering-craft skill 落地为 DSH 内可运行的工程流程套件，包 `@local/engineering-craft-suite`，已装进 desktop profile 并激活（fiberPhase: active）。
+把 engineering-craft skill 落地为 DSH 内可运行的工程流程套件，包 `@local/dsh-engineering-craft`，已装进 desktop profile 并激活（fiberPhase: active）。
 
 - **4 个工具**：`ec_stage`（阶段/门/下一岗位）、`ec_artifact`（交接物模板+校验+指针登记）、`ec_memory`（.project_memory 建库/写回/检索）、`ec_gate_metrics`（GATE-LOG）。
 - **六岗位流水线**：product → architect → developer → tester → reviewer → ops，按交接物依赖严格保序；**研发岗可条件并行**（三道门：能力/任务形状/收益，PLAN.md 中文件归属不重叠的待办单元 ≥2 时 `ec_stage(mode:'next-role')` 返回多单元，否则单岗位）；上游缺陷冻结下游退回；G1/G2/go-no-go 由人拍板，G3 凭真实命令证据。DSH 特化：恒走多 agent，不做单 agent 降级。设计见 `ADR-PARALLEL.md`。
@@ -50,4 +50,4 @@
 
 ## 安装状态
 
-已安装在 desktop profile（`include:@local/engineering-craft-suite`），链接本地目录工作区源码——后续改源码 HMR 自动重载；要下发给别人时把包目录发布，对方用插件管理器「添加本地目录」安装。
+已安装在 desktop profile（`include:@local/dsh-engineering-craft`），链接本地目录工作区源码——后续改源码 HMR 自动重载；要下发给别人时把包目录发布，对方用插件管理器「添加本地目录」安装。

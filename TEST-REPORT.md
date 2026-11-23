@@ -204,7 +204,7 @@ E2E-4 stage after confirm = {"stage":"requirements","gates":{"G1":false,...}}
 ```
 $ NODE="D:/Software/DeepSeek Harness/resources/runtime/primary-runtime/dependencies/node/bin/node.exe"; "$NODE" --version
 v24.21.0
-$ cd E:/deepseek-harness/default-workspace/engineering-craft-suite && "$NODE" --test tests/*.test.js
+$ cd E:/deepseek-harness/default-workspace/dsh-engineering-craft && "$NODE" --test tests/*.test.js
 ...
 ✔ nextRole · 六岗位推进 (2.5779ms)
 ✔ gatesBetween · 门区间边界 (0.7403ms)

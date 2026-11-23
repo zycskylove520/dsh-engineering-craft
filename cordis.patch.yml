@@ -1,4 +1,4 @@
-# engineering-craft-suite bundle patch
+# dsh-engineering-craft bundle patch
 # ---------------------------------------------------------------------------
 # 单 package-root host row：loader import 本包的 exports "."（index.js），
 # 在一个 apply(ctx) 里注册全部 host 能力（EcGate service / 4 tools / /ec / prompt section）。
@@ -6,5 +6,5 @@
 # 实测样板：dsh-windows-mcp / dsh-meme / dsh-ssh 的 cordis.patch.yml。
 # row id 与 Config namespace 同名（schemastery 设置页要求 entry id == namespace）。
 - insert:
-    - id: '@local/engineering-craft-suite'
-      name: '@local/engineering-craft-suite'
+    - id: '@local/dsh-engineering-craft'
+      name: '@local/dsh-engineering-craft'

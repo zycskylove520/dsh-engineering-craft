@@ -10,7 +10,7 @@
 - [x] `.project_memory/` 工程记忆骨架（INDEX / architecture / conventions / project / open-questions）
 
 ## P0 · bundle 骨架
-- [ ] 建 `@local/engineering-craft-suite` 包：package.json / cordis.patch.yml / locale{en,zh}.json / icon.svg / docs{DETAIL.md,preview.svg} / 空 index.js+client.js
+- [ ] 建 `@local/dsh-engineering-craft` 包：package.json / cordis.patch.yml / locale{en,zh}.json / icon.svg / docs{DETAIL.md,preview.svg} / 空 index.js+client.js
 - [ ] `node --check` 全部 JS 通过；manifest 校验
 - [ ] `plugin_manager install_bundle` 安装；plugin manager 可见、无诊断
 - **验收**：面板/插件列表出现套件条目，无 metadata 诊断

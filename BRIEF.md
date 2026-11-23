@@ -10,7 +10,7 @@
 
 ## 1. 变更摘要（评审视角）
 
-一个 bundle `@local/engineering-craft-suite`：单 host row（package-root）+ `dsh.client` 自动挂载 client 半；把 engineering-craft skill 的阶段门 / 交接物 / 工程记忆 / 六岗位流水线落地为 4 个工具（`ec_stage`/`ec_artifact`/`ec_memory`/`ec_gate_metrics`）+ `/ec` 命令 + systemPrompt 注入 + `main`/header.actions/`shell.overlay` 三 slot 面板 + `/api/engineering-craft/*` HTTP 桥。门状态按 ADR §10.5 收敛为 `<projectRoot>/.engineering-craft/state.json`，Client 用 `fetch()` 读写；六岗位顺序由 `rules.nextRole` 的 `DEFAULT_PIPELINE` 保证，交接物落盘后由 `EcGate.update` 登记路径指针（artifact 键 + role 键双写）。
+一个 bundle `@local/dsh-engineering-craft`：单 host row（package-root）+ `dsh.client` 自动挂载 client 半；把 engineering-craft skill 的阶段门 / 交接物 / 工程记忆 / 六岗位流水线落地为 4 个工具（`ec_stage`/`ec_artifact`/`ec_memory`/`ec_gate_metrics`）+ `/ec` 命令 + systemPrompt 注入 + `main`/header.actions/`shell.overlay` 三 slot 面板 + `/api/engineering-craft/*` HTTP 桥。门状态按 ADR §10.5 收敛为 `<projectRoot>/.engineering-craft/state.json`，Client 用 `fetch()` 读写；六岗位顺序由 `rules.nextRole` 的 `DEFAULT_PIPELINE` 保证，交接物落盘后由 `EcGate.update` 登记路径指针（artifact 键 + role 键双写）。
 
 评审圈范围（全部落盘文件）：`index.js`、`client.js`、`gate-service.js`、`rules.js`、`tools.js`、`command.js`、`artifacts.js`、`memory.js`、`metrics.js`、`tests/{rules,boundary,pipeline}.test.js`、`package.json`、`cordis.patch.yml`、`locale/{en,zh}.json`、`PRD.md`、`CONTRACT.md`、`PLAN.md`、`TEST-REPORT.md`、`docs/*`、`icon.svg`、`.project_memory/**`。无 git 仓库（`git status` 返回 `fatal: not a git repository`），按"全部交接物 + 全量代码"圈范围。
 
@@ -20,7 +20,7 @@
 |---|---|---|
 | 语法检查 | `node --check` 12 个 js（9 实现 + 3 测试） | 12/12 `OK` **[实测]** |
 | 全套测试 | `node --test tests/*.test.js` | `tests 61 / pass 61 / fail 0 / skip 0`，8 suites，148ms **[实测]** |
-| AC1 实机可见 | `plugin_manager list_plugins` | `include:@local/engineering-craft-suite`，`enabled:true`、`fiberPhase:"active"`、无 `readOnlyReason`/诊断 **[实测]** |
+| AC1 实机可见 | `plugin_manager list_plugins` | `include:@local/dsh-engineering-craft`，`enabled:true`、`fiberPhase:"active"`、无 `readOnlyReason`/诊断 **[实测]** |
 | 门判定与岗位顺序 | 读 `rules.js:39-110` + 61 测试逐条断言 | 符合 CONTRACT §4.1/§8/§9 **[实测]** |
 | 待拍板卡分支 | 独立 heap 探针调 `pendingConfirmOf`（见 §4 证据） | G1/G2/go-no-go/已确认/已决策 5 分支均正确 **[实测]** |
 | go-no-go 返回值 | 独立探针复现 `index.js:296` | **发现新缺陷 R-01**（见 FINDINGS） **[实测]** |
@@ -41,7 +41,7 @@ TEST-REPORT 自述的 60/60 与 lead 的 61/61 差异已解释：测试岗报告
 
 | AC | 结论 | 证据指针 |
 |---|---|---|
-| AC1 插件管理器可见、无 metadata/icon/detail 诊断 | **达成** | [实测] `plugin_manager list_plugins`：`include:@local/engineering-craft-suite` / `fiberPhase:active` / 无诊断；`cordis.patch.yml:8-10` 单 row；`package.json:36-46` dsh.client 声明；`locale/{en,zh}.json`、`icon.svg`、`docs/DETAIL.md` 落盘 |
+| AC1 插件管理器可见、无 metadata/icon/detail 诊断 | **达成** | [实测] `plugin_manager list_plugins`：`include:@local/dsh-engineering-craft` / `fiberPhase:active` / 无诊断；`cordis.patch.yml:8-10` 单 row；`package.json:36-46` dsh.client 声明；`locale/{en,zh}.json`、`icon.svg`、`docs/DETAIL.md` 落盘 |
 | AC2 `ec_stage` 查阶段与门；G1 未过拒下游 | **达成** | [实测] `tools.js:79-91` query 返回 stage/gates/gateResults/missingArtifacts；`rules.js:39-66` checkGate 四拒绝码；`tests/boundary.test.js:56-122`、`tests/rules.test.js` 逐条断言；G3 人确认路径被 `tools.js:62-69` 拒绝 |
 | AC3 `next-role` 六岗位顺序 + 仅上游交接物存在放行 | **达成** | [实测] `rules.js:23-30` DEFAULT_PIPELINE 六岗严格顺序、`rules.js:76-88` 全落盘才放行/部分落盘阻塞缺失键；`tests/boundary.test.js:131-183`、`tests/pipeline.test.js` 逐段实测；`gate-service.js:283-285` 封装 |
 | AC4 `ec_artifact` 六类模板 + 校验结构 | **达成** | [实测] `artifacts.js:13-16` 8 类键（含 testReport/findings）、`artifacts.js:32-40` 模板、`artifacts.js:19-28` schema、`artifacts.js:64-108` create/validate + 指针登记；TEST-REPORT §4.3 E2E-1 实测 create 落 PRD.md |

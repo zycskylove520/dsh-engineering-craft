@@ -21,7 +21,7 @@
 
 1. 克隆本仓库：`git clone https://github.com/zycskylove520/dsh-engineering-craft.git`
 2. DSH → 设置 → 插件 → 添加插件 → 选择本仓库目录。
-3. 启用 `@local/engineering-craft-suite`。
+3. 启用 `@local/dsh-engineering-craft`。
 
 插件是单 host row + `dsh.client` 声明自动挂载浏览器半端，状态按项目存 `<项目根>/.engineering-craft/state.json`，跨会话连续。
 

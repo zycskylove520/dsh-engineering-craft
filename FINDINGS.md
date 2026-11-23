@@ -25,7 +25,7 @@
 
 | 检查点 | 结论 | 证据 |
 |---|---|---|
-| AC1 实机可见 | 通过 | `plugin_manager list_plugins`：`include:@local/engineering-craft-suite` / `enabled:true` / `fiberPhase:"active"` / 无诊断 |
+| AC1 实机可见 | 通过 | `plugin_manager list_plugins`：`include:@local/dsh-engineering-craft` / `enabled:true` / `fiberPhase:"active"` / 无诊断 |
 | 12 文件语法 | 通过 | `node --check` 12/12 `OK` |
 | 全套测试 | 通过 | `node --test tests/*.test.js` → `tests 61 / pass 61 / fail 0` |
 | 六岗位顺序 | 通过 | `rules.js:23-30` + `tests/boundary.test.js:131-170` 逐段落盘断言；`tests/pipeline.test.js` 创建→指针→门放行链路 |
