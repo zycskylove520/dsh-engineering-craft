@@ -18,6 +18,26 @@ export const DEFAULT_GATES = Object.freeze({
   G3: { requiredArtifacts: [], requireUserConfirm: false, requireEvidence: true },
 })
 
+/** 形态 B 默认阈值（Config thresholds.minFilesForParallel，缺省 2）。纯内存，不落盘。 */
+let roleDefaults = { thresholds: { minFilesForParallel: 2 } }
+
+/**
+ * 设置形态 B 的 Config 默认值（由 index.js apply 注入；纯内存，进程重启后回缺省）。
+ * @param {{thresholds?: {minFilesForParallel?: number}}} [opts] Config 阈值；传入即整体替换默认值
+ * @returns {void}
+ */
+export function setRoleDefaults(opts = {}) {
+  roleDefaults = { thresholds: { minFilesForParallel: 2 }, ...opts }
+}
+
+/**
+ * 读形态 B 当前 Config 默认值（测试用：可保存后还原）。
+ * @returns {{thresholds: {minFilesForParallel: number}}}
+ */
+export function getRoleDefaults() {
+  return roleDefaults
+}
+
 /** ArtifactKey → 交接物文件名（CONTRACT §8，_extension 项见 §9）。 */
 const ARTIFACT_FILES = Object.freeze({
   prd: 'PRD.md', adr: 'ADR.md', contract: 'CONTRACT.md', plan: 'PLAN.md',
@@ -276,12 +296,19 @@ export default class EcGate {
   }
 
   /**
-   * 返回当前应启动的下一个岗位（封装 rules.nextRole）。
+   * 返回当前应启动的下一个岗位（封装 rules.nextRole，透传形态 B 三道门参数）。
    * @param {string} projectRoot 项目根
-   * @returns {{role: string}|{role: null, blockedBy: string}}
+   * @param {{capabilities?: {subagent?: boolean}, thresholds?: {minFilesForParallel?: number}}} [opts]
+   * @returns {{role: string}|{role: null, blockedBy: string}|
+   *   {role: 'developer', roles: string[], mode: 'B', units: Array<{id: string, ownerFiles: string[]}>}}
    */
-  nextRole(projectRoot) {
-    return nextRole(this.read(projectRoot), DEFAULT_PIPELINE)
+  nextRole(projectRoot, opts = {}) {
+    // Config 阈值作默认，调用方显式传的字段覆盖；能力门仍由 rules 默认开。
+    const merged = {
+      capabilities: { ...roleDefaults.capabilities, ...opts.capabilities },
+      thresholds: { ...roleDefaults.thresholds, ...opts.thresholds },
+    }
+    return nextRole(this.read(projectRoot), DEFAULT_PIPELINE, merged)
   }
 
   /**

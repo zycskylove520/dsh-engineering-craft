@@ -76,13 +76,17 @@
 export function checkGate(gateId, state, rule) { /* 实现留白 */ }
 
 /**
- * 按严格岗位顺序返回下一个应启动的岗位（纯函数）。
+ * 按岗位顺序返回下一个应启动的岗位（纯函数）；形态 A 单岗位，形态 B 研发岗多单元并行。
  * 仅当上游交接物路径存在（非 null 且对应文件已落盘）时放行该岗位。
+ * 形态 B 仅在下一岗位为 developer 且三道门全过时启用（ADR-PARALLEL）：
+ * 能力门 capabilities.subagent !== false（默认 true）、任务形状门 todo 单元≥2 且 ownerFiles 两两不重叠、收益门 单元数≥minFilesForParallel（默认2）。
  * @param {EcState} state 当前状态
  * @param {PipelineOrder} order 岗位顺序表（默认常量 DEFAULT_PIPELINE）
- * @returns {{role: EcRole} | {role: null, blockedBy: string}} blockedBy 为缺失交接物键
+ * @param {{capabilities?:{subagent?:boolean}, thresholds?:{minFilesForParallel?:number}}} [opts]
+ * @returns {{role: EcRole} | {role: null, blockedBy: string} | {role:'developer', roles: string[], mode:'B', units: Array<{id:string,ownerFiles:string[]}>}}
+ *   形态 A 兼容旧形状；形态 B 额外带 roles/units/mode。blockedBy 为缺失交接物键
  */
-export function nextRole(state, order = DEFAULT_PIPELINE) { /* 实现留白 */ }
+export function nextRole(state, order = DEFAULT_PIPELINE, opts = {}) { /* 实现留白 */ }
 
 /**
  * 计算从当前阶段推进到目标阶段前必须通过的全部门（纯函数）。

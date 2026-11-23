@@ -8,7 +8,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import EcGate, { DEFAULT_GATES, normalizeProjectRoot, safePathWithin, statePathOf } from './gate-service.js'
+import EcGate, { DEFAULT_GATES, normalizeProjectRoot, safePathWithin, statePathOf, setRoleDefaults } from './gate-service.js'
 import { ECO_TOOLS, ecGate } from './tools.js'
 import { registerEcCommand, runEcCommand } from './command.js'
 import { metricsAction } from './metrics.js'
@@ -176,6 +176,8 @@ export function pendingConfirmOf(state) {
 export function apply(ctx, config) {
   // 门规则可被 Config 覆盖（缺省用 DEFAULT_GATES）。
   if (config?.gates) ecGate.gates = { ...DEFAULT_GATES, ...config.gates }
+  // Config 阈值注入形态 B 默认（纯内存）；tools/command 经 EcGate.nextRole 统一读取。
+  if (config?.thresholds) setRoleDefaults({ thresholds: config.thresholds })
 
   const defineTool = hostDeps.defineTool
   // 四个工具统一注册；textOutput + 无损 JSON 包装（dsh-bili-scroll 实测样板）。
@@ -304,7 +306,13 @@ export function apply(ctx, config) {
       }
       catch (e) { return { ok: false, error: { code: 'STORAGE_UNAVAILABLE', message: String(e?.message ?? e) } } }
     }
-    if (body.kind === 'command') return runEcCommand(String(body.line ?? ''), root)
+    // 与 ec_stage 工具保持一致：HTTP action 也允许调用方显式覆盖并行判据（不传则用 Config 默认）。
+    if (body.kind === 'command') {
+      const opts = {}
+      if (body.capabilities && typeof body.capabilities === 'object') opts.capabilities = body.capabilities
+      if (body.thresholds && typeof body.thresholds === 'object') opts.thresholds = body.thresholds
+      return runEcCommand(String(body.line ?? ''), root, opts)
+    }
     return { ok: false, error: { code: 'INVALID_INPUT', message: `未知 action kind ${body.kind}` } }
   }
 
@@ -325,7 +333,13 @@ export function apply(ctx, config) {
           const root = resolveRoot(input)
           if (!root) return sendJson(res, 400, { ok: false, error: { code: 'PATH_OUT_OF_ROOT', message: 'projectRoot 非法或未传' } })
           const state = ecGate.read(root)
-          return sendJson(res, 200, { ...state, pendingConfirm: pendingConfirmOf(state) })
+          const next = ecGate.nextRole(root)
+          return sendJson(res, 200, {
+            ...state,
+            mode: next.mode ?? 'A',
+            parallelRoles: next.roles ?? [],
+            pendingConfirm: pendingConfirmOf(state),
+          })
         }
         if (req.method === 'POST' && url.pathname === '/api/engineering-craft/action') {
           const body = await readBody(req)

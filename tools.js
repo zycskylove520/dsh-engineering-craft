@@ -43,6 +43,18 @@ export const ecStageTool = {
       gate: { type: 'string', enum: ['G1', 'G2', 'G3'], description: 'confirm-gate 时必填' },
       evidence: { type: 'string', description: 'G3 confirm-gate 时必填：命令+输出摘要（非全文）' },
       userConfirmed: { type: 'boolean', description: 'G1/G2 confirm-gate 时必填：确认卡由人点过才置 true，agent 不得自报' },
+      capabilities: {
+        type: 'object',
+        properties: { subagent: { type: 'boolean', description: '能力门：false 关闭研发岗形态 B，退回形态 A 顺序岗位' } },
+        additionalProperties: false,
+        description: '形态 B 能力门，缺省视为可用（DSH 原生 subagent）',
+      },
+      thresholds: {
+        type: 'object',
+        properties: { minFilesForParallel: { type: 'integer', description: '收益门：最小并行单元数，默认 2' } },
+        additionalProperties: false,
+        description: '形态 B 收益门阈值',
+      },
       projectRoot: { type: 'string', description: '项目根绝对路径，缺省用当前工作目录' },
     },
     required: ['mode'],
@@ -52,8 +64,9 @@ export const ecStageTool = {
     if (cancelled(exec)) return CANCELLED()
     const root = normalizeProjectRoot(args.projectRoot)
     const mode = args.mode ?? 'query'
+    const roleOpts = { capabilities: args.capabilities, thresholds: args.thresholds }
     if (mode === 'next-role') {
-      const role = ecGate.nextRole(root)
+      const role = ecGate.nextRole(root, roleOpts)
       return { ok: true, ...role }
     }
     if (mode === 'confirm-gate') {
@@ -78,7 +91,7 @@ export const ecStageTool = {
     }
     const state = ecGate.read(root)
     const gateResults = Object.fromEntries(['G1', 'G2', 'G3'].map((g) => [g, ecGate.check(root, g)]))
-    const role = ecGate.nextRole(root)
+    const role = ecGate.nextRole(root, roleOpts)
     const missingArtifacts = Object.entries(state.artifacts).filter(([, v]) => !v).map(([k]) => k)
     return {
       ok: true,
@@ -86,6 +99,8 @@ export const ecStageTool = {
       gates: Object.fromEntries(Object.entries(state.gates).map(([g, v]) => [g, v.passed])),
       gateResults,
       nextRole: role.role,
+      mode: role.mode ?? 'A',
+      parallelRoles: role.roles ?? [],
       missingArtifacts,
       blockedBy: role.blockedBy ?? null,
     }

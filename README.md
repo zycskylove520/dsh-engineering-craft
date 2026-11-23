@@ -2,14 +2,14 @@
 
 > 仓库主页：<https://github.com/zycskylove520/dsh-engineering-craft>
 
-把 engineering-craft 的分层工程方法论落地成 DeepSeek Harness（DSH）内的工程流程插件套件：阶段门、交接物、工程记忆，以及严格顺序的六岗位 subagent 流水线。
+把 engineering-craft 的分层工程方法论落地成 DeepSeek Harness（DSH）内的工程流程插件套件：阶段门、交接物、工程记忆，以及按交接物依赖保序、研发岗可条件并行的六岗位 subagent 流水线。
 
 > 这是 DSH 专用插件。只依赖 DSH 自带的 `@deepseek-ai/*` 系统插件，不依赖任何市场第三方插件。
 
 ## 它能做什么
 
 - **阶段门（G1/G2/G3）**：需求未确认不许写实现代码、设计未确认不许开工、检查未过不许送审。门状态在工具返回、系统提示词与面板里可见。
-- **六岗位顺序流水线**：产品 → 架构 → 研发 → 测试 → 评审 → 运维。下游仅在上游交接物落盘后启动；交接只传路径指针；主 agent 集成重验。专为 DSH 的 subagent 机制优化，不做单 agent 退化。
+- **六岗位流水线**：产品 → 架构 → 研发 → 测试 → 评审 → 运维，按交接物依赖**严格保序**；其中**研发岗可条件并行**——当 PLAN.md 有 ≥2 个文件归属不重叠的待办单元、且能力与收益条件满足时，`ec_stage(mode:'next-role')` 返回多个并行单元，否则维持单岗位。上游交接物有问题会冻结下游退回重做。专为 DSH 的 subagent 机制设计，**恒走多 agent，不做单 agent 降级**。
 - **交接物落盘**：PRD / ADR / CONTRACT / PLAN / TEST-REPORT / BRIEF / FINDINGS / RELEASE 模板生成与结构校验。
 - **工程记忆**：维护项目级 `.project_memory/`，只存规范、带来源与日期、不遗忘。
 - **人保留拍板权**：G1/G2 确认与发布 go/no-go 通过确认卡请你决定，agent 不替你拍板。

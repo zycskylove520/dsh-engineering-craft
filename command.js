@@ -11,9 +11,11 @@ import { normalizeProjectRoot } from './gate-service.js'
  * 解析并执行一行 /ec 子命令（纯逻辑，便于 Host 与 HTTP action 复用）。
  * @param {string} line 形如 "/ec status"、"gate G2"、"memory init"
  * @param {string} [projectRoot] 项目根，缺省 cwd
+ * @param {{capabilities?: {subagent?: boolean}, thresholds?: {minFilesForParallel?: number}}} [opts]
+ *   形态 B 三道门参数；缺省沿用 ec_stage 的判定（能力门默认开、阈值 2）
  * @returns {object} 结构化结果（含 ok / 各子命令字段）
  */
-export function runEcCommand(line, projectRoot) {
+export function runEcCommand(line, projectRoot, opts = {}) {
   const root = normalizeProjectRoot(projectRoot)
   const parts = String(line ?? '').trim().split(/\s+/).filter(Boolean)
   const sub = (parts[0] === '/ec' ? parts[1] : parts[0]) ?? 'status'
@@ -21,17 +23,21 @@ export function runEcCommand(line, projectRoot) {
 
   if (sub === 'status') {
     const state = ecGate.read(root)
-    const role = ecGate.nextRole(root)
+    const role = ecGate.nextRole(root, opts)
     return {
       ok: true, command: 'status', stage: state.stage,
       gates: Object.fromEntries(Object.entries(state.gates).map(([g, v]) => [g, v.passed])),
-      role: role.role, blockedBy: role.blockedBy ?? null,
+      role: role.role, mode: role.mode ?? 'A', parallelRoles: role.roles ?? [],
+      blockedBy: role.blockedBy ?? null,
       missingArtifacts: Object.entries(state.artifacts).filter(([, v]) => !v).map(([k]) => k),
     }
   }
   if (sub === 'next') {
-    const role = ecGate.nextRole(root)
-    return { ok: true, command: 'next', ...role, ready: Boolean(role.role) }
+    const role = ecGate.nextRole(root, opts)
+    return {
+      ok: true, command: 'next', ...role,
+      mode: role.mode ?? 'A', parallelRoles: role.roles ?? [], ready: Boolean(role.role),
+    }
   }
   if (sub === 'gate') {
     const gate = (rest[0] ?? '').toUpperCase()

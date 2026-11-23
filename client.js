@@ -43,6 +43,7 @@ window.__ModuleLoader__.load({
         'role.product': '产品',
         'role.architect': '架构',
         'role.developer': '研发',
+        'role.developerParallel': '研发 ×{n}（并行）',
         'role.tester': '测试',
         'role.reviewer': '评审',
         'role.ops': '运维',
@@ -71,6 +72,7 @@ window.__ModuleLoader__.load({
         'role.product': 'Product',
         'role.architect': 'Architect',
         'role.developer': 'Developer',
+        'role.developerParallel': 'Developer ×{n} (parallel)',
         'role.tester': 'Tester',
         'role.reviewer': 'Reviewer',
         'role.ops': 'Operations',
@@ -185,9 +187,14 @@ window.__ModuleLoader__.load({
       const role = h('p', null, `${t('panel.nextRole')}：${state.nextRole ?? state.pipeline?.role ?? '-'}${state.blockedBy ? `（${t('panel.blockedBy')}：${state.blockedBy}）` : ''}`)
       const missing = h('p', null, `${t('panel.missingArtifacts')}：${Object.entries(state.artifacts ?? {}).filter(([, v]) => !v).map(([k]) => k).join(', ') || t('panel.none')}`)
       const plan = h('ul', null, (state.plan ?? []).map((u) => h('li', { key: u.id }, `${u.id} ${u.target} [${u.status}]`)))
+      const parallelRoles = Array.isArray(state.parallelRoles) ? state.parallelRoles : []
       const pipeline = h('ol', null, ROLE_KEYS.map((key) => {
         const handoff = state.pipeline?.handoffs?.[key]
-        return h('li', { key }, `${t(`role.${key}`)}${handoff ? ' ✓' : ''}`)
+        // 形态 B 下 developer 行显示并行单元数；其余岗位与其他状态一律不改。
+        const label = key === 'developer' && parallelRoles.length > 0
+          ? t('role.developerParallel').replace('{n}', String(parallelRoles.length))
+          : t(`role.${key}`)
+        return h('li', { key }, `${label}${handoff ? ' ✓' : ''}`)
       }))
 
       return h('div', { style: panelStyle },

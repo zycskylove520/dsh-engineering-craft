@@ -66,25 +66,74 @@ export function checkGate(gateId, state, rule) {
 }
 
 /**
+ * 研发岗并行单元：返回形态 B 的 roles 取单元 id 数组（调用方可据此精确落派 subagent），
+ * 同时保留 role:'developer' 让只认单岗位的旧 UI/调用方无需改动即可继续工作。
+ * @type {Array<{id: string, ownerFiles: string[]}>}
+ */
+
+/**
  * 按严格岗位顺序返回下一个应启动的岗位（纯函数）。
  * 仅当上游交接物路径存在（非 null 且对应文件已落盘）时放行该岗位；
  * 本岗位交接物部分落盘则阻塞在缺失键上（如 architect 有 ADR 缺 CONTRACT）。
+ * 下一岗位为 developer 且三道门全过时返回形态 B（研发岗内部并行单元），
+ * 否则维持形态 A 原有返回形状（不加 mode 字段，保既有 deepEqual 断言兼容）。
  * @param {object} state 当前状态
  * @param {ReadonlyArray<{role: string, outputs: string[]}>} [order=DEFAULT_PIPELINE] 岗位顺序表
- * @returns {{role: string} | {role: null, blockedBy: string}} blockedBy 为缺失交接物键
+ * @param {{capabilities?: {subagent?: boolean}, thresholds?: {minFilesForParallel?: number}}} [opts]
+ *   能力门默认开（DSH 原生 subagent）；minFilesForParallel 沿用旧字段名，语义为"最小并行单元数"。
+ * @returns {{role: string} | {role: null, blockedBy: string} |
+ *   {role: 'developer', roles: string[], mode: 'B', units: Array<{id: string, ownerFiles: string[]}>}}
+ *   blockedBy 为缺失交接物键
  */
-export function nextRole(state, order = DEFAULT_PIPELINE) {
+export function nextRole(state, order = DEFAULT_PIPELINE, opts = {}) {
   const artifacts = state?.artifacts ?? {}
   for (const entry of order) {
     const outputs = Array.isArray(entry.outputs) ? entry.outputs : []
     const present = outputs.filter((key) => artifacts[key])
     if (present.length === outputs.length) continue
     // 部分产物已落盘 = 该岗位正在交接中，缺失键即阻塞点；一个都没有 = 该岗位可启动。
-    if (present.length === 0) return { role: entry.role }
+    if (present.length === 0) {
+      if (entry.role === 'developer') {
+        const units = parallelUnits(state, opts)
+        if (units) {
+          return { role: 'developer', roles: units.map((u) => u.id), mode: 'B', units }
+        }
+      }
+      return { role: entry.role }
+    }
     const missing = outputs.find((key) => !artifacts[key])
     return { role: null, blockedBy: missing }
   }
   return { role: null, blockedBy: 'all-complete' }
+}
+
+/**
+ * 三道门判定：全过则返回可并行的 todo 单元，否则 null（调用方退回形态 A）。
+ * @param {object} state 当前状态
+ * @param {{capabilities?: {subagent?: boolean}, thresholds?: {minFilesForParallel?: number}}} opts
+ * @returns {Array<{id: string, ownerFiles: string[]}>|null}
+ */
+function parallelUnits(state, opts) {
+  // 能力门：DSH 天生具备 subagent，只有显式 false 才关闭形态 B；关闭不是单 agent 降级，仍回形态 A。
+  if (opts?.capabilities?.subagent === false) return null
+  const plan = Array.isArray(state?.plan) ? state.plan : []
+  const units = plan.filter((u) => u?.status === 'todo')
+  const threshold = Number.isFinite(opts?.thresholds?.minFilesForParallel)
+    ? opts.thresholds.minFilesForParallel
+    : 2
+  // 收益门：字段名沿用 Config 的 minFilesForParallel，语义为最小并行单元数。
+  if (units.length < threshold || units.length < 2) return null
+  // 空 ownerFiles 视为归属不可判定，保守拒绝（ADR-PARALLEL §取舍与风险）。
+  if (units.some((u) => !Array.isArray(u.ownerFiles) || u.ownerFiles.length === 0)) return null
+  const seen = new Set()
+  // 任务形状门：任一文件被两个单元声明归属即重叠，重叠会让并行写入互相覆盖。
+  for (const u of units) {
+    for (const file of u.ownerFiles) {
+      if (seen.has(file)) return null
+      seen.add(file)
+    }
+  }
+  return units.map((u) => ({ id: u.id, ownerFiles: [...u.ownerFiles] }))
 }
 
 /**

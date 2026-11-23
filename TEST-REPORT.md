@@ -186,3 +186,119 @@ E2E-4 stage after confirm = {"stage":"requirements","gates":{"G1":false,...}}
 - **P0 回归**：lead 指定的 `create prd → query 无 missing prd → confirm G1 userConfirmed → stage=design` 端到端路径**修复后实测跑通**，真实输出见 §4.3。
 - **findings**：5 条 —— F-01~F-04 **已修复并经 lead + tester 复验闭环**；F-05（handoffs 岗位键/交接物键错位，medium）**待 lead 裁决**，测试岗未改实现。
 - **纪律自查**：未弱化/跳过/删除任何测试；未 mock 被测纯函数；测试名均含"条件→期望"并断言具体输出；临时脚本全部删除；实现代码零改动。
+
+---
+
+## 9. 形态 B 并行验证（ec-test-parallel · 研发岗条件并行增量）
+
+> 岗位：ec-test-parallel（测试岗，独立验证形态 B，不改实现/测试代码）。
+> 依据：ADR-PARALLEL.md（三道门判据／接口变更／取舍与风险）、CONTRACT.md §2.1 nextRole 新签名、rules.js / gate-service.js / tools.js / command.js / client.js / index.js、tests/parallel.test.js。
+> 日期：2026-11-23。Node：`D:/Software/DeepSeek Harness/resources/runtime/primary-runtime/dependencies/node/bin/node.exe`（v24.21.0）。
+> 证据等级：**[实测]**=本轮真实命令输出 / 临时脚本实跑；**[推断]**=基于实测代码逻辑的合理推论，未端到端复现。
+> 注意：本节为**追加**，不重写 §1~§8 既有内容。lead 交接时自述「71/71 全绿」，本节独立复跑时为 72/72（研发岗 Config 注入修复的第 11 条测试同期落地），已从研发岗取得落地确认，详见 §9.5。
+
+### 9.1 独立复跑全套测试（不采信自述）
+
+真实命令与输出（开发岗 Config 注入修复落地后）：
+
+```
+$ NODE="D:/Software/DeepSeek Harness/resources/runtime/primary-runtime/dependencies/node/bin/node.exe"; "$NODE" --version
+v24.21.0
+$ cd E:/deepseek-harness/default-workspace/engineering-craft-suite && "$NODE" --test tests/*.test.js
+...
+✔ nextRole · 六岗位推进 (2.5779ms)
+✔ gatesBetween · 门区间边界 (0.7403ms)
+ℹ tests 72
+ℹ suites 10
+ℹ pass 72
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 165.6712
+[exit code: 0]
+```
+
+- **[实测]** 全套 72/72 全绿、fail=0、skip=0。与研发岗自述 72/72、lead 交接时 71/71 的差异已定位：第 11 条 `tests/parallel.test.js`「Config 阈值默认注入」用例为本轮研发岗补缺口时新增，属预期增量，非回归。
+- 测试文件分布（`tests/*.test.js`）：rules 25 + boundary 31 + pipeline 4 + parallel 11（上节记 60 条时 parallel 尚未落盘）≈ 72 条，新增 12 条中 1 条即 Config 注入用例。
+- 结论：**[实测]** lead 的「全绿」判定属实，且本节以独立复跑证据确认，未采信自述。[推断：本轮未逐字复跑 12 文件 `node --check`，但 72 条测试加载并执行了全部实现模块，语法可由「测试进程未抛 SyntaxError」间接佐证。]
+
+### 9.2 边界探针（研发岗 11 条测试未覆盖，临时脚本实跑，跑完即删）
+
+临时脚本 `_ec_parallel_probe.mjs` / `_ec_parallel_probe2.mjs` 在 tmp 目录造状态、直接调用纯函数 `nextRole` 与透传层 `EcGate.nextRole` / `runEcCommand`，**未 mock 被测函数、未改实现**。真实输出（原样摘录）：
+
+```
+=== 探针 1：PLAN 单元 status=doing 不算 todo ===
+PASS 1a doing+todo（仅 1 个 todo）→ 形态 A
+  actual   = {"role":"developer"}
+PASS 1b doing+todo+todo（2 todo）→ B 且 units 只含 2 个 todo
+  actual   = {"role":"developer","roles":["D1","D2"],"mode":"B","units":[{"id":"D1","ownerFiles":["client.js"]},{"id":"D2","ownerFiles":["metrics.js"]}]}
+
+=== 探针 2：单元数恰好等于阈值边界 ===
+PASS 2a 阈值=2 且 2 单元 → B（边界通过）
+  actual   = {"role":"developer","roles":["T1","T2"],"mode":"B",...}
+PASS 2b 阈值=2 且 1 单元 → A（边界退回）
+  actual   = {"role":"developer"}
+PASS 2c 阈值=1 且 1 单元 → A（units<2 硬下限，不被阈值 1 放宽）
+  actual   = {"role":"developer"}
+PASS 2d 阈值=3 且 3 单元 → B（边界通过）
+  actual   = "B"
+
+=== 探针 3：三单元中两单元重叠、一个独立 → 保守退回 A ===
+PASS 3a 纯函数 nextRole（3 单元含局部重叠）→ A
+  actual   = {"role":"developer"}
+
+=== 跨层一致性 ===
+PASS 4a gate-service.nextRole doing+todo+todo → B only D1,D2
+  actual   = ["D1","D2"]
+PASS 4b Config 默认阈值=3 + 3 单元 经 command /ec next → B
+  actual   = "B"
+5a Config 默认阈值=3 + 2 单元，无显式 opts → mode=A, roles=[]
+5b Config 默认阈值=3 + 显式 opts=2 + 2 单元 → mode=B, roles=["T1","T2"]
+PROBE DONE / PROBE2 DONE
+```
+
+探针结论（均 **[实测]**）：
+
+| 探针 | 条件 | 实测结果 | 判定 |
+|---|---|---|---|
+| P1a | doing+todo（1 个真 todo） | `{role:'developer'}`（形态 A） | ✅ `doing` 不计入 todo；与 ADR-PARALLEL §决策 3 一致 |
+| P1b | doing+todo+todo（2 个真 todo） | B，`roles=['D1','D2']`，doing 单元被排除 | ✅ 归属、过滤均正确 |
+| P2a | 阈值=2、2 单元 | B（边界等于阈值，通过） | ✅ `>=` 语义正确 |
+| P2b | 阈值=2、1 单元 | A（边界下方退回） | ✅ 收益门正确 |
+| P2c | 阈值=1、1 单元 | A（`units<2` 硬下限生效） | ✅ 即使阈值被调到 1，也不会伪造"单单元并行"，与 ADR「≥2 单元」硬条件一致 |
+| P2d | 阈值=3、3 单元 | B（等于阈值通过） | ✅ 阈值可配置且边界正确 |
+| P3a | 三单元 O1=[rules.js]、O2=[rules.js,tools.js]、O3=[client.js] | A（局部重叠即保守退回） | ✅ 不是只看首尾、也不是放过局部重叠；与 ADR「有重叠则退回形态 A」一致 |
+| P4a | 同 P1b 数据经 `EcGate.nextRole` | `roles=['D1','D2']` | ✅ 透传层保留 doing 过滤语义 |
+| P4b / 5a / 5b | Config 默认阈值 3 + 显式 opts 覆盖，经 `/ec next` | 2 单元→A；显式 2→B | ✅ Config 注入默认 opts 并允许调用方覆盖，跨域一致 |
+
+> 边界探针数：**9 项断言**（P1a、P1b、P2a~P2d、P3a、P4a、P4b + 5a/5b 合并为一组）——按题设 3 类探针（doing / 阈值边界 / 局部重叠）组织，另含跨层一致性附加断言。
+
+### 9.3 三道门/形态判定实测 vs 推断
+
+| 结论 | 等级 | 依据 |
+|---|---|---|
+| 三道门全过 + ownerFiles 不重叠 → B 多单元（rules/工具/命令/client 显示） | **[实测]** | §9.1 全套测试 + §9.2 P1b/P2a/P2d 真实输出；client.js:190-197 静态确认 mode=B 时 developer 显示 `研发 ×{n}（并行）` |
+| 三道门任一不过（含 doing 不计 todo、局部重叠、阈值不足）→ A | **[实测]** | §9.2 P1a/P2b/P2c/P3a 真实输出 |
+| Config.thresholds 注入默认 opts、显式 opts 优先 | **[实测]** | §9.2 P4b/5a/5b；研发岗第 11 条测试同验 |
+| ADR §取舍「ownerFiles 空数组 → 保守 A」 | **[实测]** | tests/parallel.test.js ⑤（随全套跑绿） |
+| DSH 真机 `ec_stage(mode:'next-role')` 双形态实机验证 | **[推断]** | 本轮测试环境仅 Node；`tools.js:63-107` execute 真实执行路径已由测试 ⑧ 覆盖，未起 DSH 插件宿主 GUI（与 §7 既有未验证项同类） |
+
+### 9.4 发现的问题（findings）
+
+> 格式 `{id, severity, file:line, issue, fix}`。**测试岗未改任何实现**，交 lead 裁决。
+
+| id | severity | file:line | issue | fix |
+|---|---|---|---|---|
+| P-F-01 | low | `gate-service.js:22` + `index.js:180`（`setRoleDefaults`） | Config 阈值默认值 `roleDefaults` 为模块级**纯内存**变量，进程重启后回落到硬编码缺省 2。若用户在设置页把 `minFilesForParallel` 改为 3，宿主进程重启且 `apply()` 未再次注入（如配置未触发重激活），形态 B 收益门会静默回落到 2——属"配置不持久"边界，非本轮测试可实测（需真机重启进程）。ADR-PARALLEL §决策 3 只说"Config 可关能力门/阈值可配"，未规定重启后的行为。 | 交 lead 裁决：① 接受现状并在 CONTRACT 注明"阈值默认仅进程内有效，重启需插件重激活注入"；或 ② 把阈值随 `EcState` 落盘（新字段需升 `stateVersion`，代价大）。测试岗不改实现。 |
+| P-F-02 | low | `index.js:309`（`/ec command` action 分支）与 `tools.js:67/94`（`ec_stage` 透传 opts） | HTTP action `kind:'command'` 调 `runEcCommand(line, root)` 未透传 `body.capabilities/thresholds`，而 `ec_stage` 工具与直接 `runEcCommand` 调用都接受 opts——同一"收益门"在 HTTP 入口无法被请求级覆盖，只能吃 Config 默认。对 UI/外部调用方是能力不一致（非错误行为：仍按 Config 默认正确判定）。本轮用 `runEcCommand` 直接调用已验证 opts 生效，HTTP 入口未起服务实测。 | 交 lead 裁决：是否在 `runAction` 的 `kind==='command'` 分支把 `body.capabilities/thresholds` 传给 `runEcCommand`；若不改，在 CONTRACT §5/§6 注明"HTTP action 不支持请求级三道门opts，走 Config 默认"。 |
+
+- 本轮**未发现**形态 B 核心逻辑（三道门判定、形态 A 返回兼容、透传链路、client 显示）的功能性缺陷；上述两条均为低优先级边界一致性问题，不阻塞当前交付。
+- 边界探针中首轮脚本 4c 断言标签曾写错（状态是 3 单元却标"2 单元"），已用第二次补探针 5a/5b 更正并取得准确输出；该标签错误属测试脚本笔误，非实现问题。
+
+### 9.5 最终复跑与纪律自查
+
+- 研发岗确认 Config 注入修复已落地（gate-service.js 的 `roleDefaults`/`setRoleDefaults`，index.js `apply()` 注入，tests/parallel.test.js 第 11 条）。**最终复跑**：`node --test tests/*.test.js` → 72/72 全绿（§9.1 真实输出），fail=0。
+- 临时脚本 `_ec_parallel_probe.mjs` / `_ec_parallel_probe2.mjs` 跑完即删（实测 `ls _ec_*` → `NO_TEMP_FILES_LEFT`），仓库无残留。
+- 纪律：本节只追加不重写；实现代码零改动；未采信 lead/研发岗自述，全部结论以独立复跑与临时脚本真实输出为准。
+- **追加节结论**：形态 B 三道门与形态 A 兼容语义**通过独立验证（实测）**；72/72 全绿；边界探针 9 项断言全过；发现 2 条 low findings，交 lead 裁决，未改实现。

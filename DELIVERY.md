@@ -8,7 +8,7 @@
 把 engineering-craft skill 落地为 DSH 内可运行的工程流程套件，包 `@local/engineering-craft-suite`，已装进 desktop profile 并激活（fiberPhase: active）。
 
 - **4 个工具**：`ec_stage`（阶段/门/下一岗位）、`ec_artifact`（交接物模板+校验+指针登记）、`ec_memory`（.project_memory 建库/写回/检索）、`ec_gate_metrics`（GATE-LOG）。
-- **六岗位顺序流水线**：product → architect → developer → tester → reviewer → ops，交接物落盘、只传路径指针、门未过不得进下游；G1/G2/go-no-go 由人拍板，G3 凭真实命令证据。DSH 特化：不做单 agent 退化（按主人要求）。
+- **六岗位流水线**：product → architect → developer → tester → reviewer → ops，按交接物依赖严格保序；**研发岗可条件并行**（三道门：能力/任务形状/收益，PLAN.md 中文件归属不重叠的待办单元 ≥2 时 `ec_stage(mode:'next-role')` 返回多单元，否则单岗位）；上游缺陷冻结下游退回；G1/G2/go-no-go 由人拍板，G3 凭真实命令证据。DSH 特化：恒走多 agent，不做单 agent 降级。设计见 `ADR-PARALLEL.md`。
 - **面板**：`main` keyed 面板（阶段/门/PLAN/岗位树）+ 会话头「工程面板」入口 + go/no-go 确认卡（`shell.overlay`）。
 - **状态**：按项目落 `projectRoot/.engineering-craft/state.json`（跨会话连续）；Host↔Client 用 `ctx.webServer` + `fetch()`。
 - **/ec 命令** + systemPrompt 门状态注入（两者防御性，失败不影响激活）。
@@ -16,11 +16,12 @@
 ## 实测验收（证据见 TEST-REPORT.md / FINDINGS.md）
 
 - AC1 实机：install_bundle + set_plugin 激活成功，`fiberPhase: active` 无诊断；4 工具经 Tool inspection 确认注册。
-- AC2~AC4/AC10：G1 未过拒绝下游、交接物→指针→门放行链路、六岗位严格顺序——61/61 测试绿，端到端 create prd → confirm G1 → stage=design 实测通过。
+- AC2~AC4/AC10：G1 未过拒绝下游、交接物→指针→门放行链路、六岗位保序 + 研发岗形态 B——72/72 测试绿（含 11 条形态 B 用例），端到端 create prd → confirm G1 → stage=design 实测通过；两种形态冒烟：三道门全过→B 多单元、文件重叠/能力关闭→A 单岗位。
 - AC5/AC6：memory 规范层只写规范带来源日期；`/ec` 子命令冒烟通过。
 - AC7：面板/确认卡代码就绪，pendingConfirmOf 五分支实测正确；**Client 真实渲染未实测**（本会话未做浏览器页面级验证）。
 - AC8：locale en/zh 文件完整；**已知限制**：client.js 文案硬编码中文、locale 未接线（评审 R-02，见下）。
-- AC9：61 测试 + 实机激活 + 5 findings 全闭环。
+- AC9：72 测试 + 实机激活 + 5 findings 全闭环。
+- **本次增量（2026-11-23 晚）**：按主人要求给研发岗加条件并行（对齐 skill 的形态 B，但保留 DSH 恒多 agent、无单 agent 降级）。走流水线：ADR-PARALLEL（架构）→ 研发岗实现 + Config 阈值闭环 → 测试岗独立验证（TEST-REPORT §9，边界探针 9 项断言全 PASS）。测试岗 2 条 low findings：P-F-01 roleDefaults 纯内存重启回落（设计如此，Config 由 apply 重新注入，不改）；P-F-02 HTTP action 未透传并行 opts（已修：透传 capabilities/thresholds，与 ec_stage 工具入口一致）。
 
 ## 已知限制（诚实标注）
 
