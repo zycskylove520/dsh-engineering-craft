@@ -2,6 +2,8 @@
 
 > 仓库主页：<https://github.com/zycskylove520/dsh-engineering-craft>
 
+**本插件来自另一个项目：[engineering-craft 通用 skill](https://github.com/zycskylove520/engineering-craft)。** 那个项目是纯 Markdown、不绑定任何 agent 软件的代码工程规范；**如果你不用 DSH，或想要不依赖 DSH 的版本，请直接使用它**。本仓库是它针对 DeepSeek Harness 的特化实现——把工程纪律做成 DSH 里可调用的工具、面板与多 agent 流水线。
+
 把 engineering-craft 的工程纪律搬进 DeepSeek Harness：阶段门、交接物落盘、工程记忆，以及由多个 subagent 分工协作的六岗位流水线。
 
 > DSH 专用插件。只依赖 DSH 自带的 `@deepseek-ai/*` 系统插件，不依赖任何市场第三方插件。
