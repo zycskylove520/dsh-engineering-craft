@@ -219,11 +219,12 @@ describe('safePathWithin · 路径穿越基本拒绝（CONTRACT §4.1 PATH_OUT_O
     assert.equal(safePathWithin('   ', root), null)
   })
 
-  test('符号链接解析：safePathWithin 只做词法规范化，不做 realpath', () => {
-    // 说明：本函数用 node:path resolve/normalize，不解析 symlink；
-    // 因此"根目录内指向外部的符号链接"不在其防御范围，需调用方保证。
-    // 该行为按设计记录于此，符号链接实测受 Windows 建链权限限制，见 TEST-REPORT 未验证项。
-    assert.equal(typeof safePathWithin, 'function')
+  test('符号链接：词法规范化对根内相对路径放行，realpath 越界不在防御范围（已知限制）', () => {
+    // 本函数用 node:path resolve/normalize，只做词法规范化、不解析 symlink。
+    // 断言真实行为：根内 './sub/../a.md' 规范化后仍落在根内 → 放行；
+    // "根内符号链接指向根外"不在防御范围，按设计记录（Windows 建链权限受限，实测见 TEST-REPORT 未验证项）。
+    const inside = safePathWithin('./sub/../a.md', root)
+    assert.equal(inside, join('E:/proj/root', 'a.md'))
   })
 })
 

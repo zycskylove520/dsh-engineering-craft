@@ -23,6 +23,17 @@
 - AC9：72 测试 + 实机激活 + 5 findings 全闭环。
 - **本次增量（2026-11-23 晚）**：按主人要求给研发岗加条件并行（对齐 skill 的形态 B，但保留 DSH 恒多 agent、无单 agent 降级）。走流水线：ADR-PARALLEL（架构）→ 研发岗实现 + Config 阈值闭环 → 测试岗独立验证（TEST-REPORT §9，边界探针 9 项断言全 PASS）。测试岗 2 条 low findings：P-F-01 roleDefaults 纯内存重启回落（设计如此，Config 由 apply 重新注入，不改）；P-F-02 HTTP action 未透传并行 opts（已修：透传 capabilities/thresholds，与 ec_stage 工具入口一致）。
 
+## 交付前全量审查（2026-11-23 终轮）
+
+用 4 个独立只读 agent 并行审四维（代码正确性 / 文档实现一致性 / 与 skill 思想对齐 / 测试质量），lead 逐条核实原文后修复：
+
+- **2 个 blocker 已修**：① HTTP/工具层的 `projectRoot` 自校验恒真（`safePathWithin(root,root)`）使白名单形同虚设——新增 `resolveAllowedRoot()`（允许根来自 `EC_ALLOWED_ROOTS`，缺省 cwd + 系统 tmpdir），HTTP 与工具统一使用；实测根内放行、根外拒绝。② `EcConfirmCard` 在提前 return 后调用 `useCallback` 违反 React hooks 规则会崩——hook 提到返回前、gate 改由参数传入。
+- **should 已修**：ownerFiles 重叠检测做路径规范化（防 `./a.js` vs `a.js` 绕过）；坏 state.json / 残缺字段转 STORAGE_UNAVAILABLE；GET /state 补 `nextRole`（面板"下一岗位"不再恒 '-'）；readBody 改 Buffer.concat 一次解码（防中文跨 chunk 乱码）；confirmGate/G3 的 stage 只前进不回退。
+- **测试质量已修**：符号链接空断言改为真实行为断言；补 `apply(ctx,config)` 生产接线测试（删 index.js:180 必红）；73/73 全绿。
+- **文档漂移已修**：ADR-PARALLEL 形态 B 返回值、CONTRACT §2.2/§5.1/§6/§4.2、根 ADR 三处陈旧三态路由措辞、README 均已与实现对齐。
+- **与 skill 思想对齐度：高**。六岗位保序、双形态三道门、交接物落盘只传指针、lead 集成重验、事实等级、契约收敛留痕、G1/G2/go-no-go 人拍板均有源码证据。保留的合理差异仅"无单 agent 降级"（主人明确要求的 DSH 特化）。
+- **已知限制（不阻断）**：releaseDecision 使 EcState 增字段但未升 version（schema 漂移，已记录）；确认动作信任 userConfirmed 布尔（设计风险，加 nonce 属新功能）；safePathWithin 不解析 realpath（默认允许根已收窄，Windows 建链权限受限）；TEST-REPORT §9 与 CONTRACT §9 两处记录性漂移；临时目录未清理（测试卫生）。
+
 ## 已知限制（诚实标注）
 
 1. ~~**R-02（nit，未修）**：locale 死资源。~~ **已修复（2026-11-23 补做）**：client.js 接 DSH 自带系统插件 `@deepseek-ai/dsh-client-locale`——`ctx.locale.register(NS,{zh,en})` 注册字典、`ctx.locale.bind(NS)` 拿 t、`useSyncExternalStore(locale.subscribe, locale.getSnapshot)` 订阅语言切换即时重渲染；26 个 UI 文案全部走 t，面板/确认卡/入口随设置页语言切换。只依赖 `@deepseek-ai/*` 系统插件，未引入任何市场第三方插件。zh/en 字典 26 键一一对应。

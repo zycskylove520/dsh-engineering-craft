@@ -126,11 +126,16 @@ function parallelUnits(state, opts) {
   // 空 ownerFiles 视为归属不可判定，保守拒绝（ADR-PARALLEL §取舍与风险）。
   if (units.some((u) => !Array.isArray(u.ownerFiles) || u.ownerFiles.length === 0)) return null
   const seen = new Set()
+  const ids = new Set()
   // 任务形状门：任一文件被两个单元声明归属即重叠，重叠会让并行写入互相覆盖。
+  // 路径按分隔符统一 + 大小写折叠后比较，避免 './a.js' 与 'a.js'、'src\\a.js' 与 'src/a.js' 绕过。
   for (const u of units) {
+    if (ids.has(u.id)) return null // id 重复也算不可判定
+    ids.add(u.id)
     for (const file of u.ownerFiles) {
-      if (seen.has(file)) return null
-      seen.add(file)
+      const key = String(file).replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase()
+      if (seen.has(key)) return null
+      seen.add(key)
     }
   }
   return units.map((u) => ({ id: u.id, ownerFiles: [...u.ownerFiles] }))

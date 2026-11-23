@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { nextRole, DEFAULT_PIPELINE } from '../rules.js'
 import EcGate, { getRoleDefaults, setRoleDefaults } from '../gate-service.js'
+import { apply } from '../index.js'
 import { ECO_TOOLS } from '../tools.js'
 import { runEcCommand } from '../command.js'
 
@@ -161,5 +162,29 @@ describe('形态 B 透传 · gate-service / ec_stage / /ec', () => {
     const s = runEcCommand('/ec status', root)
     assert.equal(s.mode, 'B')
     assert.deepEqual(s.parallelRoles, ['P1', 'P2'])
+  })
+
+  test('生产接线：apply(ctx, config) 把 Config.thresholds 注入 roleDefaults', () => {
+    // 覆盖 index.js:180 这一行——删掉它本测试必须变红（审计发现的缺口）。
+    const original = getRoleDefaults()
+    const stub = {
+      tools: { register() {} },
+      webServer: { register() {} },
+      effect(fn) { try { fn() } catch { /* 注册容错：stub 不模拟 DSH 全部服务 */ } },
+      get() { return undefined },
+    }
+    try {
+      apply(stub, { thresholds: { minFilesForParallel: 7 } })
+      assert.equal(getRoleDefaults().thresholds.minFilesForParallel, 7)
+      const root = freshRoot()
+      const gate = new EcGate()
+      gate.write({ ...developerState(twoDisjointUnits()), projectRoot: root })
+      // 默认阈值 7 > 2 单元 → 形态 A（无 roles 字段）；证明生产接线生效。
+      const routed = gate.nextRole(root)
+      assert.equal(routed.role, 'developer')
+      assert.equal(routed.roles, undefined)
+    } finally {
+      setRoleDefaults(original)
+    }
   })
 })

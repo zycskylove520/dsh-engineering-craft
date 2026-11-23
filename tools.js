@@ -4,7 +4,7 @@
  * parameters 是标准 JSON Schema object，每个 type:'object' 都显式写 additionalProperties。
  * execute(args, exec) 返回普通对象，失败为 {ok:false,error:{code,...}}；exec.signal 可取消。
  */
-import EcGate, { ecError, normalizeProjectRoot } from './gate-service.js'
+import EcGate, { ecError, resolveAllowedRoot } from './gate-service.js'
 import { artifactAction } from './artifacts.js'
 import { memoryAction } from './memory.js'
 import { metricsAction } from './metrics.js'
@@ -62,7 +62,8 @@ export const ecStageTool = {
   },
   async execute(args, exec) {
     if (cancelled(exec)) return CANCELLED()
-    const root = normalizeProjectRoot(args.projectRoot)
+    const root = resolveAllowedRoot(args.projectRoot ?? process.cwd())
+    if (!root) return { ok: false, error: ecError('PATH_OUT_OF_ROOT', 'projectRoot 不在允许根内（EC_ALLOWED_ROOTS）', {}) }
     const mode = args.mode ?? 'query'
     const roleOpts = { capabilities: args.capabilities, thresholds: args.thresholds }
     if (mode === 'next-role') {
@@ -127,7 +128,8 @@ export const ecArtifactTool = {
   },
   async execute(args, exec) {
     if (cancelled(exec)) return CANCELLED()
-    const root = normalizeProjectRoot(args.projectRoot)
+    const root = resolveAllowedRoot(args.projectRoot ?? process.cwd())
+    if (!root) return { ok: false, error: ecError('PATH_OUT_OF_ROOT', 'projectRoot 不在允许根内（EC_ALLOWED_ROOTS）', {}) }
     // 注入指针登记回调而非反向 import：登记失败由 artifactAction 转成 {ok:false,error} 返回。
     return artifactAction({
       ...args,

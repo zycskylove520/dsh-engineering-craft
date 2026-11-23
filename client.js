@@ -222,29 +222,29 @@ window.__ModuleLoader__.load({
       }, [root])
 
       const pending = state?.pendingConfirm
-      if (!pending) return null
-
-      const submit = useCallback(async (decision) => {
+      // hooks 必须在任何提前返回之前调用，保证每次渲染数量/顺序恒定（React 规则）。
+      const submit = useCallback(async (decision, gate) => {
         const r = await api('/api/engineering-craft/action', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             projectRoot: root,
-            kind: pending.gate === 'go-no-go' ? 'go-no-go' : 'confirm-gate',
-            gate: pending.gate,
+            kind: gate === 'go-no-go' ? 'go-no-go' : 'confirm-gate',
+            gate,
             decision,
             userConfirmed: true,
           }),
         })
         if (r.ok !== false) setState((s) => ({ ...s, pendingConfirm: null }))
-      }, [root, pending])
+      }, [root])
+      if (!pending) return null
 
       const title = pending.gate === 'go-no-go' ? t('confirm.goNoGo') : `${t('confirm.title')}：${pending.gate}`
       return h('div', { style: cardStyle },
         h('strong', null, title),
         h('div', null,
-          h('button', { style: buttonStyle, onClick: () => submit('approve') }, t('confirm.approve')),
-          h('button', { style: buttonStyle, onClick: () => submit('reject') }, t('confirm.reject')),
+          h('button', { style: buttonStyle, onClick: () => submit('approve', pending.gate) }, t('confirm.approve')),
+          h('button', { style: buttonStyle, onClick: () => submit('reject', pending.gate) }, t('confirm.reject')),
         ),
       )
     }

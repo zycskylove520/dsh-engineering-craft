@@ -149,11 +149,12 @@ export default class EcGate {
   update(session, patch) { /* 留白 */ }
 
   /**
-   * 返回当前应启动的下一个岗位（封装 rules.nextRole）。
-   * @param {Session} session 会话
-   * @returns {{role: EcRole} | {role: null, blockedBy: string}}
+   * 返回当前应启动的岗位（封装 rules.nextRole；形态 A 单岗位 / 形态 B 研发岗多单元）。
+   * @param {string} projectRoot 项目根（架构收敛后不再传 Session）
+   * @param {{capabilities?:{subagent?:boolean}, thresholds?:{minFilesForParallel?:number}}} [opts]
+   * @returns {{role: EcRole}|{role:null, blockedBy:string}|{role:'developer', roles:string[], mode:'B', units:Array<{id:string,ownerFiles:string[]}>}}
    */
-  nextRole(session) { /* 留白 */ }
+  nextRole(projectRoot, opts = {}) { /* 留白 */ }
 
   /**
    * 生成注入 prompt 的门状态段落文本（供 systemPrompt.section 使用）。
@@ -294,7 +295,7 @@ EcState（投影缓存，stateVersion=1）──handle.stateOf()──► EcGate
 - **loader entry id 必须等于 namespace 名**（row id 即包名 ` '@local/engineering-craft-suite'`，见 §1）+ 本模块导出 `Config`，三者齐备设置页才可写。
 - schema 校验范围要宽松：范围约束（如阈值上下限）放在**写/读时钳制**，不要写成 `.min()/.max()` 等硬校验——校验不过会让 cordis 拒收 entry ⇒ 整条插件不激活（bili `commentPerRound` 的教训）。
 
-默认值来自 ADR §4.2；`收益阈值` 指多 agent 三道门的"任务够大才摊平协调成本"门（ADR §11 保留为可配；本套件恒走多 agent，但阈值用于提示"是否需要 workflow 升级"）。
+默认值来自 ADR §4.2；`minFilesForParallel` 是**形态 B 的收益门**（语义为最小并行单元数，见 ADR-PARALLEL §取舍与风险；默认 2），`minUnitsForWorkflow` 为预留配置项（当前未使用）。本套件恒走多 agent，无 single/workflow 路由。
 
 ```js
 /**
@@ -340,14 +341,17 @@ Config 保存走 `ctx.fiber.entry` + `ctx.get('configEditor').edit(entry, curren
   "type": "object",
   "properties": {
     "mode": {"type":"string","enum":["query","confirm-gate","next-role"],"default":"query",
-             "description":"query=只读状态；confirm-gate=记录人确认/证据；next-role=返回下一岗位"},
+             "description":"query=只读状态；confirm-gate=记录人确认/证据；next-role=返回下一岗位或形态B多单元"},
     "gate": {"type":"string","enum":["G1","G2","G3"],"description":"confirm-gate 时必填"},
-    "evidence": {"type":"string","description":"G3 confirm-gate 时必填：命令+输出摘要（非全文）"}
+    "evidence": {"type":"string","description":"G3 confirm-gate 时必填：命令+输出摘要（非全文）"},
+    "projectRoot": {"type":"string","description":"项目根绝对路径，缺省用进程 cwd；须落在允许根内"},
+    "capabilities": {"type":"object","properties":{"subagent":{"type":"boolean"}},"additionalProperties":false,"description":"形态B能力门，默认开启"},
+    "thresholds": {"type":"object","properties":{"minFilesForParallel":{"type":"integer"}},"additionalProperties":false,"description":"形态B收益门，最小并行单元数，默认2"}
   },
   "required": ["mode"], "additionalProperties": false
 }
 ```
-- **execute 返回**（默认 textOutput 渲染）：`{ok:true, stage, gates, nextRole, missingArtifacts, blockedBy}` 普通对象；拒绝时 `{ok:false, error:{code:'GATE_NOT_PASSED'|'NOT_USER_CONFIRMED'|'NO_EVIDENCE', details}}`（不是 `isError:true` 的 ToolResult）。`confirm-gate` 的 G1/G2 只接受"用户已在本轮确认"的上下文标记，agent 不得自报确认（ADR-003）。
+- **execute 返回**（默认 textOutput 渲染）：`{ok:true, stage, gates, gateResults, nextRole, mode, parallelRoles, missingArtifacts, blockedBy}` 普通对象（形态 A 的 `parallelRoles` 为空数组）；拒绝时 `{ok:false, error:{code:'GATE_NOT_PASSED'|'NOT_USER_CONFIRMED'|'NO_EVIDENCE'|'PATH_OUT_OF_ROOT', details}}`（不是 `isError:true` 的 ToolResult）。`confirm-gate` 的 G1/G2 只接受"用户已在本轮确认"的上下文标记，agent 不得自报确认（ADR-003）。形态 B 三道门见 ADR-PARALLEL.md。
 
 ### 5.2 `ec_artifact`
 
@@ -415,7 +419,7 @@ Config 保存走 `ctx.fiber.entry` + `ctx.get('configEditor').edit(entry, curren
 | 子命令 | 作用 | 输出 |
 |---|---|---|
 | `/ec status` | 显示当前阶段 / 三门状态 / 在岗岗位 | 简表 + 缺失交接物指针 |
-| `/ec next` | 返回下一应启动岗位 + 进入条件是否满足 | `{role, ready, blockedBy}` |
+| `/ec next` | 返回下一应启动岗位（形态 A 单岗位 / 形态 B 研发岗多单元） | `{role, ready, blockedBy, mode?, parallelRoles}` |
 | `/ec gate <G1\|G2\|G3> [evidence]` | 触发门确认（G1/G2 需人确认上下文，G3 需 evidence） | 成功/失败 + code |
 | `/ec metrics [limit]` | 回看 GATE-LOG | bounded 记录列表 |
 | `/ec memory <init\|write\|query> …` | 转发 memory 能力（与工具同语义） | 路径指针 / excerpt |

@@ -8,7 +8,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import EcGate, { DEFAULT_GATES, normalizeProjectRoot, safePathWithin, statePathOf, setRoleDefaults } from './gate-service.js'
+import EcGate, { DEFAULT_GATES, normalizeProjectRoot, safePathWithin, resolveAllowedRoot, statePathOf, setRoleDefaults } from './gate-service.js'
 import { ECO_TOOLS, ecGate } from './tools.js'
 import { registerEcCommand, runEcCommand } from './command.js'
 import { metricsAction } from './metrics.js'
@@ -210,11 +210,17 @@ export function apply(ctx, config) {
     res.end(JSON.stringify(obj))
   }
   const readBody = (req) => new Promise((resolve) => {
-    let data = ''
+    const chunks = []
+    let bytes = 0
     let done = false
     const finish = (v) => { if (!done) { done = true; resolve(v) } }
-    req.on('data', (c) => { data += c; if (data.length > 1_000_000) { data = ''; finish({}); req.destroy() } })
-    req.on('end', () => { try { finish(JSON.parse(data || '{}')) } catch { finish({}) } })
+    req.on('data', (c) => {
+      bytes += c.length
+      if (bytes > 1_000_000) { finish({}); req.destroy(); return }
+      chunks.push(c)
+    })
+    // 收集 Buffer 后一次 UTF-8 解码：避免中文跨 chunk 被拆成乱码。
+    req.on('end', () => { try { finish(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')) } catch { finish({}) } })
     req.on('error', () => finish({}))
   })
 
@@ -265,11 +271,8 @@ export function apply(ctx, config) {
     }
   }
 
-  /** 统一项目根校验：越出 cwd 白名单根时拒绝（与工具层同策略）。 */
-  const resolveRoot = (input) => {
-    const root = normalizeProjectRoot(input)
-    return safePathWithin(root, root) ? root : null
-  }
+  /** 统一项目根校验：须落在显式允许根集合内（EC_ALLOWED_ROOTS，缺省 cwd），与工具层同策略。 */
+  const resolveRoot = (input) => resolveAllowedRoot(input)
 
   /** POST action 的业务分发：与 /ec 命令共用门逻辑，人拍板动作保持用户专属。 */
   const runAction = (body) => {
@@ -336,6 +339,7 @@ export function apply(ctx, config) {
           const next = ecGate.nextRole(root)
           return sendJson(res, 200, {
             ...state,
+            nextRole: next.role ?? null,
             mode: next.mode ?? 'A',
             parallelRoles: next.roles ?? [],
             pendingConfirm: pendingConfirmOf(state),

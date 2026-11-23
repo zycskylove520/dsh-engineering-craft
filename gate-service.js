@@ -5,11 +5,20 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join, normalize, resolve, sep } from 'node:path'
+import { tmpdir } from 'node:os'
 import { checkGate, nextRole, gatesBetween, DEFAULT_PIPELINE } from './rules.js'
 
 /** 状态文件名与目录名（相对 projectRoot）。 */
 export const STATE_DIR_NAME = '.engineering-craft'
 export const STATE_FILE_NAME = 'state.json'
+
+/** 阶段推进顺序（与 rules.js STAGE_ORDER 一致）；用于门确认时只前进不回退。 */
+const STAGE_ORDER = ['requirements', 'design', 'coding', 'testing', 'review', 'delivery', 'release']
+
+/** 只在目标阶段更靠后时推进 stage；重复/迟到确认保持当前阶段（避免 delivery 被 G1 打回 design）。 */
+function advanceStage(current, target) {
+  return STAGE_ORDER.indexOf(target) > STAGE_ORDER.indexOf(current) ? target : current
+}
 
 /** 默认门规则（CONTRACT §4.2）。 */
 export const DEFAULT_GATES = Object.freeze({
@@ -94,6 +103,29 @@ export function safePathWithin(target, root) {
 }
 
 /**
+ * 把调用方给的 projectRoot 解析到显式允许根集合内（安全边界）。
+ * 允许根来自环境变量 EC_ALLOWED_ROOTS（分号分隔的绝对路径），缺省为 process.cwd()。
+ * 不能用 input 自身当允许根（那样恒真、等于无校验）。
+ * @param {string} input 调用方给的项目根
+ * @returns {string|null} 落在允许根内的规范绝对路径，否则 null
+ */
+export function resolveAllowedRoot(input) {
+  if (typeof input !== 'string' || !input.trim()) return null
+  const configured = process.env.EC_ALLOWED_ROOTS
+  // 缺省允许：当前工作目录 + 系统临时目录（测试/一次性冒烟用 os.tmpdir，系统隔离）。
+  // 生产若需收紧，设 EC_ALLOWED_ROOTS 显式覆盖。
+  const roots = (configured && configured.trim())
+    ? configured.split(';').map((s) => s.trim()).filter(Boolean)
+    : [process.cwd(), tmpdir()]
+  const candidate = resolve(normalize(isAbsolute(input) ? input : join(process.cwd(), input)))
+  for (const root of roots) {
+    const allowed = safePathWithin(candidate, root)
+    if (allowed) return allowed
+  }
+  return null
+}
+
+/**
  * state.json 的绝对路径（不要求文件存在）。
  * @param {string} projectRoot 项目根
  * @returns {string} state.json 绝对路径
@@ -149,9 +181,19 @@ export default class EcGate {
   read(projectRoot) {
     const file = statePathOf(projectRoot)
     if (!existsSync(file)) return initialState(projectRoot)
-    const parsed = JSON.parse(readFileSync(file, 'utf8'))
+    let parsed
+    try {
+      parsed = JSON.parse(readFileSync(file, 'utf8'))
+    } catch (e) {
+      // 坏 JSON 不能让裸 SyntaxError 穿透工具层；转成领域错误（STORAGE_UNAVAILABLE）。
+      throw ecError('STORAGE_UNAVAILABLE', `state.json 解析失败：${file}（${e?.message ?? e}）`, { file })
+    }
     if (!parsed || parsed.version !== 1) {
-      throw new Error(`stateVersion 不匹配：${file} 期望 1，实际 ${parsed?.version}`)
+      throw ecError('STORAGE_UNAVAILABLE', `stateVersion 不匹配：${file} 期望 1，实际 ${parsed?.version}`, { file })
+    }
+    // 必要字段完整性：缺 gates/artifacts/plan 的残缺状态视为不可用，避免下游 deep 访问崩溃。
+    if (!parsed.gates || !parsed.artifacts || !Array.isArray(parsed.plan)) {
+      throw ecError('STORAGE_UNAVAILABLE', `state.json 字段不完整：${file}`, { file })
     }
     return parsed
   }
@@ -214,7 +256,7 @@ export default class EcGate {
       at: Number.isFinite(meta.at) ? meta.at : Date.now(),
       evidence: meta.evidence ?? null,
     }
-    state.stage = gateId === 'G1' ? 'design' : 'coding'
+    state.stage = advanceStage(state.stage, gateId === 'G1' ? 'design' : 'coding')
     state.metrics.lastGate = gateId
     state.updatedAt = Date.now()
     try {
@@ -244,7 +286,7 @@ export default class EcGate {
       at: Date.now(),
       evidence: `${evidence.command} :: ${evidence.outputDigest}`.slice(0, 500),
     }
-    state.stage = 'testing'
+    state.stage = advanceStage(state.stage, 'testing')
     state.metrics.lastGate = 'G3'
     state.updatedAt = Date.now()
     try {

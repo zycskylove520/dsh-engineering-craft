@@ -21,8 +21,8 @@
 ## 接口变更（供 CONTRACT 与研发岗）
 
 - `rules.nextRole(state, order, opts)` 新增 `opts = { capabilities?: {subagent?: boolean}, thresholds?: {minFilesForParallel?: number} }`。
-  - 返回 `{role: string, roles?: undefined, blockedBy?, mode:'A'}` 或 `{role:null, roles: string[], mode:'B', units:[{id,ownerFiles}], blockedBy?}`。
-  - 为兼容既有调用，形态 A 返回值保持原有 `{role}` / `{role:null,blockedBy}` 形状，仅**新增** `mode` 字段（可选，不破坏旧断言）。
+  - 返回形态 A `{role: string}` / `{role:null, blockedBy:string}`（保持旧形状，**不带 mode**）或形态 B `{role:'developer', roles:string[], mode:'B', units:[{id,ownerFiles}]}`。
+  - 为兼容既有调用，形态 A 不加 mode；调用方用 `roles` 是否存在区分形态（与 rules.js / CONTRACT §2.1 实现一致）。
 - `gate-service.nextRole(projectRoot, opts)` 透传；EcState 不需要新字段（并行判定纯函数、按当前 state.plan 计算）。
 - `ec_stage` inputSchema 加 `capabilities`（object，可选）与 `mode` 枚举不变；输出加 `mode` 与 `parallelRoles`。
 - `/ec next` 同步输出 `mode` 与 `parallelRoles`。
