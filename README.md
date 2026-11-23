@@ -1,6 +1,8 @@
 # dsh-engineering-craft
 
-把 [engineering-craft](https://github.com/) 的分层工程方法论落地成 [DeepSeek Harness](https://github.com/)（DSH）内的工程流程插件套件：阶段门、交接物、工程记忆，以及严格顺序的六岗位 subagent 流水线。
+> 仓库主页：<https://github.com/zycskylove520/dsh-engineering-craft>
+
+把 engineering-craft 的分层工程方法论落地成 DeepSeek Harness（DSH）内的工程流程插件套件：阶段门、交接物、工程记忆，以及严格顺序的六岗位 subagent 流水线。
 
 > 这是 DSH 专用插件。只依赖 DSH 自带的 `@deepseek-ai/*` 系统插件，不依赖任何市场第三方插件。
 
