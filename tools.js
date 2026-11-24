@@ -4,7 +4,7 @@
  * parameters 是标准 JSON Schema object，每个 type:'object' 都显式写 additionalProperties。
  * execute(args, exec) 返回普通对象，失败为 {ok:false,error:{code,...}}；exec.signal 可取消。
  */
-import EcGate, { ecError, resolveAllowedRoot } from './gate-service.js'
+import EcGate, { ecError, resolveAllowedRoot, normalizeToolError } from './gate-service.js'
 import { artifactAction } from './artifacts.js'
 import { memoryAction } from './memory.js'
 import { metricsAction } from './metrics.js'
@@ -19,6 +19,8 @@ function cancelled(exec) {
 
 /** 取消结果。 */
 const CANCELLED = () => ({ ok: false, error: ecError('INVALID_INPUT', '工具执行已取消', { reason: 'aborted' }) })
+
+/** 领域错误归一化统一在 gate-service.normalizeToolError（此处 import 复用）。 */
 
 /**
  * 工具 spec 统一形状（CONTRACT §2.3）。
@@ -77,7 +79,10 @@ export const ecStageTool = {
         if (!args.gate) return { ok: false, error: ecError('INVALID_INPUT', 'confirm-gate 须指定 gate', {}) }
         // G1/G2 只由人拍板：工具调用者须显式声明 userConfirmed；G3 走证据路径。
         if (args.gate === 'G3') {
-          const input = String(args.evidence ?? '')
+          const input = String(args.evidence ?? '').trim()
+          if (!input) {
+            return { ok: false, error: ecError('NO_EVIDENCE', 'G3 confirm-gate 须提供 evidence（命令::输出摘要）', { gate: 'G3' }) }
+          }
           const sep = input.indexOf('::')
           const command = (sep >= 0 ? input.slice(0, sep) : input).trim()
           const outputDigest = (sep >= 0 ? input.slice(sep + 2) : '').trim()
@@ -109,8 +114,7 @@ export const ecStageTool = {
         blockedBy: role.blockedBy ?? null,
       }
     } catch (e) {
-      if (e && typeof e === 'object' && typeof e.code === 'string') return { ok: false, error: e }
-      return { ok: false, error: ecError('STORAGE_UNAVAILABLE', `读取工程状态失败：${e?.message ?? e}`, {}) }
+      return normalizeToolError(e, '读取工程状态失败')
     }
   },
 }
@@ -126,11 +130,11 @@ export const ecArtifactTool = {
     type: 'object',
     properties: {
       action: { type: 'string', enum: ['create', 'validate'], description: 'create=写模板；validate=只读校验' },
-      kind: { type: 'string', enum: ['prd', 'adr', 'contract', 'plan', 'brief', 'release', 'testReport', 'findings'] },
-      path: { type: 'string', description: '目标路径；须落在 projectRoot 标签内（防 .. 穿越）' },
+      kind: { type: 'string', enum: ['prd', 'adr', 'contract', 'plan', 'brief', 'release', 'testReport', 'findings', 'progress'] },
+      path: { type: 'string', description: '目标路径（省略则落 .project_memory/tmp/<文件名>）；必须落在 .project_memory/tmp/ 内，越界返回 ARTIFACT_OUTSIDE_TMP' },
       projectRoot: { type: 'string', description: '项目根路径标签（本机或远端均可，如 /remote/path/to/Project）；不做存在性校验，缺省用当前工作目录' },
     },
-    required: ['action', 'kind', 'path'],
+    required: ['action', 'kind'],
     additionalProperties: false,
   },
   async execute(args, exec) {
@@ -146,8 +150,7 @@ export const ecArtifactTool = {
         update: (patch) => ecGate.update(root, patch),
       })
     } catch (e) {
-      if (e && typeof e === 'object' && typeof e.code === 'string') return { ok: false, error: e }
-      return { ok: false, error: ecError('STORAGE_UNAVAILABLE', `交接物操作失败：${e?.message ?? e}`, {}) }
+      return normalizeToolError(e, '交接物操作失败')
     }
   },
 }
@@ -158,18 +161,23 @@ export const ecArtifactTool = {
  */
 export const ecMemoryTool = {
   name: 'ec_memory',
-  description: '初始化或按 INDEX 线索读写 .project_memory/ 规范层；只存规范，不写会话流水。',
+  description: '初始化或按 INDEX 线索读写 .project_memory/ 工程记忆（6 职责目录+3 根文件+tmp）；recall=写码前检索套用，命中条目 id 列入 PLAN constraints。',
   parameters: {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: ['init', 'write', 'query'], description: 'init=建骨架；write=写规范带来源+日期；query=按需读' },
+      action: {
+        type: 'string', enum: ['init', 'write', 'query', 'recall'],
+        description: 'init=建骨架（6目录+3根文件+标记+tmp）；write=写规范（五件套校验，单行五件套自动分条）；query=按需读；recall=检索套用（返回 id/kind 供 PLAN.constraints）',
+      },
       projectRoot: { type: 'string', description: '项目根路径标签（本机或远端均可，如 /remote/path/to/Project）；不做存在性校验，缺省用当前工作目录' },
       layer: {
-        type: 'string', enum: ['architecture', 'conventions', 'project', 'open-questions', 'index'],
-        description: 'write/query 的目标层（index 指 INDEX.md）',
+        type: 'string',
+        enum: ['index', 'status', 'open-questions', 'architecture', 'conventions', 'api-contracts', 'data-model', 'testing', 'build', 'tmp'],
+        description: 'write/query 的目标层：根文件或职责目录',
       },
-      content: { type: 'string', description: 'write 时正文；须含来源与日期指针' },
-      query: { type: 'string', description: 'query 时的检索线索（不倾倒全目录）' },
+      file: { type: 'string', description: '职责目录内的文件名（如 architecture/engine.md 的 engine，省略默认 overview）' },
+      content: { type: 'string', description: 'write 时正文；须合五件套（[KIND ID] + 陈述 + 证据: + 记录: 日期·等级）' },
+      query: { type: 'string', description: 'query/recall 的检索线索（recall 会全规范层扫描，返回命中 id/kind）' },
     },
     required: ['action'],
     additionalProperties: false,
@@ -178,7 +186,11 @@ export const ecMemoryTool = {
     if (cancelled(exec)) return CANCELLED()
     const root = resolveAllowedRoot(args.projectRoot ?? process.cwd())
     if (!root) return { ok: false, error: ecError('INVALID_INPUT', 'projectRoot 是空标签（须非空字符串）', {}) }
-    return memoryAction({ ...args, projectRoot: root })
+    try {
+      return memoryAction({ ...args, projectRoot: root })
+    } catch (e) {
+      return normalizeToolError(e, '工程记忆操作失败')
+    }
   },
 }
 
@@ -194,8 +206,10 @@ export const ecGateMetricsTool = {
     properties: {
       action: { type: 'string', enum: ['record', 'list'], default: 'list' },
       gate: { type: 'string', enum: ['G1', 'G2', 'G3'], description: 'record 时必填' },
-      outcome: { type: 'string', enum: ['blocked', 'passed'], description: 'record 时必填' },
-      reason: { type: 'string', description: 'record 时：拦截/放行原因摘要（bounded）' },
+      outcome: { type: 'string', enum: ['拦住', '通过', '绕过'], description: 'record 时必填' },
+      stage: { type: 'string', description: 'record 时：产品/架构/研发/测试/评审/运维' },
+      missing: { type: 'string', description: 'record 时：缺什么（六字段之一）' },
+      disposition: { type: 'string', description: 'record 时：处置（六字段之一）' },
       limit: { type: 'integer', minimum: 1, maximum: 100, default: 20, description: 'list 时最多返回条数' },
       projectRoot: { type: 'string', description: '项目根路径标签（本机或远端均可，如 /remote/path/to/Project）；不做存在性校验，缺省用当前工作目录' },
     },
@@ -206,7 +220,11 @@ export const ecGateMetricsTool = {
     if (cancelled(exec)) return CANCELLED()
     const root = resolveAllowedRoot(args.projectRoot ?? process.cwd())
     if (!root) return { ok: false, error: ecError('INVALID_INPUT', 'projectRoot 是空标签（须非空字符串）', {}) }
-    return metricsAction({ ...args, projectRoot: root })
+    try {
+      return metricsAction({ ...args, projectRoot: root })
+    } catch (e) {
+      return normalizeToolError(e, '门度量操作失败')
+    }
   },
 }
 

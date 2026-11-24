@@ -5,14 +5,14 @@
  * 避免反向 import tools.js 造成 ESM 循环（artifacts ← tools 的既有依赖方向不变）。
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { ecError, safePathWithin } from './gate-service.js'
-import { dirnameFor } from './ec-path.js'
+import { ecError, safePathWithin, ARTIFACT_FILES } from './gate-service.js'
+import { dirnameFor, joinFor } from './ec-path.js'
 
-/** ArtifactKey → 文件名（CONTRACT §8）。 */
-export const ARTIFACT_FILES = Object.freeze({
-  prd: 'PRD.md', adr: 'ADR.md', contract: 'CONTRACT.md', plan: 'PLAN.md',
-  brief: 'BRIEF.md', release: 'RELEASE.md', testReport: 'TEST-REPORT.md', findings: 'FINDINGS.md',
-})
+/**
+ * 执行产物默认目录（对齐 skill：所有交接物统一落 .project_memory/tmp/，不散落项目根）。
+ * 调用方显式传 path 时仍可覆盖，但默认落点必须是 tmp/。
+ */
+export const ARTIFACTS_DIR = '.project_memory/tmp'
 
 /** ArtifactKey → 必须存在的顶层标题或字段（最小 schema，CONTRACT §8）。 */
 export const ARTIFACT_SCHEMA = Object.freeze({
@@ -24,6 +24,7 @@ export const ARTIFACT_SCHEMA = Object.freeze({
   release: ['发布清单', '回滚预案', '观察项', 'go/no-go'],
   testReport: ['测试代码指针', '覆盖率', '边界异常', '真实输出', '证据分级'],
   findings: ['id', 'severity', 'file:line', 'issue', 'fix', 'VERDICT'],
+  progress: ['Goal', 'Done', 'Next', 'Open questions', 'Key facts'],
 })
 
 /** 模板正文（最小结构骨架；正文由各岗位填）。 */
@@ -31,11 +32,12 @@ const TEMPLATES = Object.freeze({
   prd: '# PRD · 产品需求文档\n\n## 目标\n\n## 用户与场景\n\n## 用户故事\n\n## 优先级\n\n## 验收标准(可判定)\n\n## 开放问题\n',
   adr: '# ADR · 架构决策记录\n\n## 状态\n\n## 目标与非目标\n\n## 总体架构\n\n## 模块清单\n\n## 数据模型\n\n## 风险与取舍\n\n## 待拍板\n',
   contract: '# CONTRACT · 接口契约\n\n## 模块边界\n\n## 公开 API 签名\n\n## 数据流\n\n## 错误语义\n\n## Config schema\n\n## EcState JSON\n\n## 工具约定\n\n## 子命令\n\n## slot 清单\n\n## 交接物字段\n',
-  plan: '# PLAN · 执行计划\n\n## 目标\n\n## 单元\n\n- [ ] id=P1 target=… ownerFiles=[…] acceptance=… status=todo\n',
+  plan: '# PLAN · 执行计划\n\n## 目标\n\n## 检索套用约束\n\n<!-- 写码前 recall 命中的工程记忆条目 id 列此；无命中标「无既有约定」 -->\n\n## 单元\n\n- [ ] id=P1 target=… ownerFiles=[…] acceptance=… status=todo constraints=[R-XXX-01]\n',
   brief: '# BRIEF · 评审简报\n\n## 变更摘要\n\n## 风险\n\n## 验证结论\n',
   release: '# RELEASE · 发布清单\n\n## 发布清单\n\n## 回滚预案\n\n## 观察项\n\n## go/no-go(人)\n',
   testReport: '# TEST-REPORT · 测试报告\n\n## 测试代码指针\n\n## 覆盖率\n\n## 边界异常\n\n## 真实输出\n\n## 证据分级(实测/推断/猜测)\n',
   findings: '# FINDINGS · 评审发现\n\n| id | severity | file:line | issue | fix |\n| --- | --- | --- | --- | --- |\n\n## VERDICT\n',
+  progress: '# PROGRESS · 长任务接力\n\n## Goal\n\n## Done\n\n## Next\n\n## Open questions\n\n## Key facts\n',
 })
 
 /**
@@ -54,9 +56,9 @@ function registerPointer(args, safe, kind) {
 
 /**
  * 生成交接物模板或校验已有交接物结构（工具 ec_artifact 的能力实现）。
- * @param {{action: 'create'|'validate', kind: string, path: string, projectRoot?: string,
+ * @param {{action: 'create'|'validate', kind: string, path?: string, projectRoot?: string,
  *         update?: (patch: {artifact: string, path: string}) => {ok: boolean, error?: object}}} args 入参；
- *        update 为可选的指针登记回调（注入以避免 ESM 循环）
+ *        path 省略时默认 .project_memory/tmp/<文件名>；update 为可选的指针登记回调（注入以避免 ESM 循环）
  * @returns {{ok: true, kind: string, path: string, status: 'created'|'exists'|'valid'|'invalid', missingFields: string[]}
  *          |{ok: false, error: {code: string, message: string, details: object}}} Result
  */
@@ -69,9 +71,19 @@ export function artifactAction(args) {
   if (typeof root !== 'string' || !root.trim()) {
     return { ok: false, error: ecError('INVALID_INPUT', 'projectRoot 是空标签', { projectRoot: root }) }
   }
-  const safe = safePathWithin(args.path, root)
+  // 执行产物统一落 .project_memory/tmp/（skill document-tree.md §7 硬要求，不散落项目根）。
+  // 显式 path 只接受落在 tmp/ 内；传项目根等其他位置一律拒绝，避免散落。
+  const tmpRoot = joinFor(root, ARTIFACTS_DIR)
+  const rawPath = typeof args.path === 'string' && args.path.trim()
+    ? args.path
+    : joinFor(tmpRoot, ARTIFACT_FILES[kind])
+  const safe = safePathWithin(rawPath, root)
   if (!safe) {
-    return { ok: false, error: ecError('PATH_OUT_OF_ROOT', `交接物路径越出项目根：${args.path}`, { path: args.path, root }) }
+    return { ok: false, error: ecError('PATH_OUT_OF_ROOT', `交接物路径越出项目根：${rawPath}`, { path: rawPath, root }) }
+  }
+  if (!safePathWithin(safe, tmpRoot)) {
+    return { ok: false, error: ecError('ARTIFACT_OUTSIDE_TMP',
+      `交接物必须落在 .project_memory/tmp/ 内（不散落项目根）：${rawPath}`, { path: rawPath, tmpRoot }) }
   }
   if (args.action === 'create') {
     if (existsSync(safe)) {

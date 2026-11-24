@@ -30,8 +30,9 @@
 - [ ] AC1 插件管理器可见 `@local/dsh-engineering-craft`，无 metadata/icon/detail 诊断。
 - [ ] AC2 `ec_stage` 能查询阶段与门；G1 未过时拒绝进入编码动作。
 - [ ] AC3 `ec_stage(mode:'next-role')` 按 product→architect→developer→tester→reviewer→ops 返回下一岗位，且仅在上游交接物存在时放行。
-- [ ] AC4 `ec_artifact` 生成 PRD/ADR/CONTRACT/PLAN/Brief/Release 模板并校验结构。
-- [ ] AC5 `ec_memory` 能 init/write/query `.project_memory/`，只写规范层、带来源与日期。
+- [ ] AC4 `ec_artifact` 生成 PRD/ADR/CONTRACT/PLAN/Brief/Release/TEST-REPORT/FINDINGS/PROGRESS 模板并校验结构（`[2026-11-24 更新]` 清单已扩展；保留原文）。
+- [ ] AC5 `ec_memory` 能 init/write/query/recall `.project_memory/`，只写规范层。
+  - `[2026-11-24 更新]` 写入校验已从"带来源与日期"升级为**强制五件套**（`[KIND ID]`+陈述+证据+记录日期·等级）+四条硬约束，并新增 recall 检索套用；保留原文，以 CONTRACT §5.3 为准。
 - [ ] AC6 `/ec` 命令可列出 status/next/gate/metrics/memory；prompt 注入含当前门与岗位。
 - [ ] AC7 Client 面板显示阶段/门/PLAN/岗位树；go/no-go 确认卡只在需要人拍板时出现。
 - [ ] AC8 locale en+zh 完整；面板用 theme token；无 slot crash。

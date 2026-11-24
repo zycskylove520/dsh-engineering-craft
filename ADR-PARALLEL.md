@@ -2,6 +2,7 @@
 
 > 状态：G2 已由主人确认（"插件是 DSH 特化版本，天生支持多 agent；实现某些情况下多 agent 可并行、某些情况必须严格顺序；不需要单 agent 降级"）。
 > 本 ADR 是对 ADR §6 的增量修订，不推翻其他部分。
+> **术语**：本文"三道门"一律指**研发岗并行的三判据（能力 / 任务形状 / 收益）**，与阶段门 G1/G2/G3 无关；后者统称"阶段门"。
 
 ## 背景
 
@@ -13,7 +14,7 @@
 2. **形态 B 仅限研发岗内部**：当下一岗位为 `developer` 且满足三道门时，`nextRole` 返回多个并行单元 `roles:[...]`（每个单元来自 PLAN.md 的 `ownerFiles` 不重叠分组），而非单个 role；否则维持 `{role:'developer'}`。
 3. **三道门判据**：
    - 能力门：调用方传入 `capabilities.subagent === true`（DSH 天生有，默认 true，Config 可关）。
-   - 任务形状门：PLAN.md 中状态为 `todo` 的单元 ≥2，且 `ownerFiles` 两两不重叠（有重叠则退回形态 A，不制造假并行）。
+   - 任务形状门：PLAN.md 中状态为 `todo` 的候选单元 ≥2，且**所有未完成单元（todo+doing）**的 `ownerFiles` 两两不重叠（路径按 posix.normalize 折叠后比较；有重叠则退回形态 A，不制造假并行）。2026-11-24 评审修正：原只查 todo 之间，漏掉 doing 单元与候选抢同一文件。
    - 收益门：单元数 ≥ Config `thresholds.minFilesForParallel`（默认 2）。
 4. **不做单 agent 降级**：无论能力门是否通过，仍返回多 agent 岗位或单元；能力门关闭只意味着形态 B 不启用（退回形态 A 的多 agent 顺序），绝不返回"单 agent 代理六岗位"。
 5. **交接物与门不变**：并行单元各自仍以 `plan` 交接物落盘为准；上游缺陷（ADR/CONTRACT）仍冻结所有下游单元退回上游；人拍板点（G1/G2/go-no-go）不变。
@@ -25,6 +26,7 @@
   - 为兼容既有调用，形态 A 不加 mode；调用方用 `roles` 是否存在区分形态（与 rules.js / CONTRACT §2.1 实现一致）。
 - `gate-service.nextRole(projectRoot, opts)` 透传；EcState 不需要新字段（并行判定纯函数、按当前 state.plan 计算）。
 - `ec_stage` inputSchema 加 `capabilities`（object，可选）与 `mode` 枚举不变；输出加 `mode` 与 `parallelRoles`。
+  - `[实测纠正]` 本条 "inputSchema" 应读作 `parameters`（CONTRACT §2.3 已实测：字段是 `defineTool({name,description,parameters,output,execute})`，非 inputSchema）。此处保留原文，以实测为准。
 - `/ec next` 同步输出 `mode` 与 `parallelRoles`。
 - client 面板的岗位树在 mode=B 时把 developer 显示为多个并行单元。
 

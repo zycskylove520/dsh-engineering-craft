@@ -2,18 +2,19 @@
  * rules.js —— 工程流程门规则纯函数集（CONTRACT §2.1）。
  * 无 ctx / fs 依赖；工具、命令、面板共用这一份判定。错误码见 CONTRACT §4.1。
  */
+import { posix } from 'node:path'
 
 /**
  * 门标识 → 该门放行后进入的阶段（CONTRACT §9 stage 枚举）。
  * @type {Record<string, string>}
  */
-const GATE_TARGET_STAGE = { G1: 'design', G2: 'coding', G3: 'testing' }
+export const GATE_TARGET_STAGE = Object.freeze({ G1: 'design', G2: 'coding', G3: 'testing' })
 
 /**
  * 阶段推进顺序；gatesBetween 用它在两个 stage 间取区间。
  * @type {string[]}
  */
-const STAGE_ORDER = ['requirements', 'design', 'coding', 'testing', 'review', 'delivery', 'release']
+export const STAGE_ORDER = ['requirements', 'design', 'coding', 'testing', 'review', 'delivery', 'release']
 
 /**
  * 默认岗位顺序表：product→architect→developer→tester→reviewer→ops（ADR §6.1）。
@@ -66,17 +67,14 @@ export function checkGate(gateId, state, rule) {
 }
 
 /**
- * 研发岗并行单元：返回形态 B 的 roles 取单元 id 数组（调用方可据此精确落派 subagent），
- * 同时保留 role:'developer' 让只认单岗位的旧 UI/调用方无需改动即可继续工作。
- * @type {Array<{id: string, ownerFiles: string[]}>}
- */
-
-/**
  * 按严格岗位顺序返回下一个应启动的岗位（纯函数）。
  * 仅当上游交接物路径存在（非 null 且对应文件已落盘）时放行该岗位；
  * 本岗位交接物部分落盘则阻塞在缺失键上（如 architect 有 ADR 缺 CONTRACT）。
  * 下一岗位为 developer 且三道门全过时返回形态 B（研发岗内部并行单元），
- * 否则维持形态 A 原有返回形状（不加 mode 字段，保既有 deepEqual 断言兼容）。
+ * 否则维持形态 A 返回形状（不加 mode 字段）。
+ *
+ * 注意：本函数是交接物驱动的岗位推进，门（G1/G2/G3）是"可查询的纪律"而非内核强制钩子——
+ * nextRole 不消费 gates，门状态由 ec_stage 查询暴露、由人按纪律遵守（README「已知限制」已声明）。
  * @param {object} state 当前状态
  * @param {ReadonlyArray<{role: string, outputs: string[]}>} [order=DEFAULT_PIPELINE] 岗位顺序表
  * @param {{capabilities?: {subagent?: boolean}, thresholds?: {minFilesForParallel?: number}}} [opts]
@@ -117,28 +115,31 @@ function parallelUnits(state, opts) {
   // 能力门：DSH 天生具备 subagent，只有显式 false 才关闭形态 B；关闭不是单 agent 降级，仍回形态 A。
   if (opts?.capabilities?.subagent === false) return null
   const plan = Array.isArray(state?.plan) ? state.plan : []
-  const units = plan.filter((u) => u?.status === 'todo')
+  // 收益门看可并行候选（todo）；形状门的重叠检测须覆盖所有未完成单元（含 doing），
+  // 否则新派发的 todo 单元可能与正在进行的 doing 单元写同一个文件。
+  const candidates = plan.filter((u) => u?.status === 'todo')
+  const active = plan.filter((u) => u?.status === 'todo' || u?.status === 'doing')
   const threshold = Number.isFinite(opts?.thresholds?.minFilesForParallel)
     ? opts.thresholds.minFilesForParallel
     : 2
   // 收益门：字段名沿用 Config 的 minFilesForParallel，语义为最小并行单元数。
-  if (units.length < threshold || units.length < 2) return null
+  if (candidates.length < threshold || candidates.length < 2) return null
   // 空 ownerFiles 视为归属不可判定，保守拒绝（ADR-PARALLEL §取舍与风险）。
-  if (units.some((u) => !Array.isArray(u.ownerFiles) || u.ownerFiles.length === 0)) return null
+  if (active.some((u) => !Array.isArray(u.ownerFiles) || u.ownerFiles.length === 0)) return null
   const seen = new Set()
   const ids = new Set()
-  // 任务形状门：任一文件被两个单元声明归属即重叠，重叠会让并行写入互相覆盖。
-  // 路径按分隔符统一 + 大小写折叠后比较，避免 './a.js' 与 'a.js'、'src\\a.js' 与 'src/a.js' 绕过。
-  for (const u of units) {
+  // 任务形状门：任一文件被两个未完成单元声明归属即重叠，重叠会让并行写入互相覆盖。
+  // posix.normalize 折叠中间 ./ 与 ..，统一分隔符 + 小写，避免 src/a.js 与 src/./a.js 绕过。
+  for (const u of active) {
     if (ids.has(u.id)) return null // id 重复也算不可判定
     ids.add(u.id)
     for (const file of u.ownerFiles) {
-      const key = String(file).replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase()
+      const key = posix.normalize(String(file).replace(/\\/g, '/')).toLowerCase()
       if (seen.has(key)) return null
       seen.add(key)
     }
   }
-  return units.map((u) => ({ id: u.id, ownerFiles: [...u.ownerFiles] }))
+  return candidates.map((u) => ({ id: u.id, ownerFiles: [...u.ownerFiles] }))
 }
 
 /**

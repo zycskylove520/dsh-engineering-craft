@@ -23,7 +23,7 @@
 2. DSH → 设置 → 插件 → 添加插件 → 选择本仓库目录。
 3. 启用 `@local/dsh-engineering-craft`。
 
-插件是单 host row + `dsh.client` 声明自动挂载浏览器半端，状态按项目存 `<项目根>/.engineering-craft/state.json`，跨会话连续。
+插件是单 host row + `dsh.client` 声明自动挂载浏览器半端，状态按项目存 `<项目根>/.ec-state/state.json`（无兼容：旧路径 `.engineering-craft/state.json` 不读取、不迁移；版本不是 2 直接报 `STORAGE_UNAVAILABLE`），跨会话连续。
 
 ## 三种使用场景
 
@@ -33,12 +33,12 @@
 
 ### 2. 融入已有项目
 
-- **有代码、尚无记忆**：它通读源码，沉淀出这个项目的架构、命名和习惯（每条带文件路径证据），指出不合理设计并和你协商，再建起 `.project_memory/`。不擅自大改。
-- **代码和记忆都在**：先读 `INDEX.md` 按现有约定干活，不重写你的规矩。
+- **有代码、尚无记忆**：它通读源码，沉淀出这个项目的架构、命名和习惯（每条带文件路径证据），指出不合理设计并和你协商，再建起 `.project_memory/`——标准骨架为 **6 个职责目录**（architecture / conventions / api-contracts / data-model / testing / build，build 独立于 architecture）+ **3 个根文件**（INDEX.md / status.md / open-questions.md）+ **tmp/** 执行产物区，全部建好、内容可薄但不缺位；目录所有权用空文件 `.engineering-craft` 标记。不擅自大改。
+- **代码和记忆都在**：先读 `INDEX.md` 按现有约定干活，不重写你的规矩；写业务/核心代码前用 `ec_memory recall` 按线索检索全规范层，把命中条目 id 列入 `.project_memory/tmp/PLAN.md` 的 constraints（每个并行单元各自检索，无命中标「无既有约定」）。
 
 ### 3. 下一次
 
-不用重讲项目背景。说「开始工程」+ 新需求，它读已有记忆接着上次的约定走；有长期约定变化会写回规范层，下次自动生效。
+不用重讲项目背景。说「开始工程」+ 新需求，它读已有记忆接着上次的约定走；写码前先 `ec_memory recall` 检索套用既有约定，有长期约定变化会写回规范层，下次自动生效。
 
 日常写代码、改 bug、重构、审查代码时，这套工具也会自动可用。
 
@@ -57,7 +57,7 @@
 
 六岗位按交接物依赖**严格保序**：上游落盘、下游才开工。**研发岗可条件并行**——当 PLAN.md 里有 ≥2 个文件归属不重叠的待办单元、且能力与收益门槛满足时，一次启动多个研发单元；否则单岗位顺序推进。上游交接物有问题会冻结下游、退回重做。
 
-**恒走多 agent，不做单 agent 降级**——这是 DSH 特化（subagent 是原生能力），不是偷懒的兜底。
+**默认多 agent，不做单 agent 降级**——这是 DSH 特化（subagent 是原生能力）；只有一个不可分单元时，单岗位顺序执行亦合规（非失败）。
 
 只有三个地方需要**你**拍板：确认需求验收、确认技术选型、发布 go/no-go；其余由 agent 按纪律推进。
 
@@ -68,16 +68,18 @@
 | 工具 | 作用 |
 |---|---|
 | `ec_stage` | 查阶段/门状态、记录门确认、取下一岗位或并行单元 |
-| `ec_artifact` | 生成交接物模板（落盘 + 登记指针）或校验结构 |
-| `ec_memory` | `.project_memory/` 建库 / 写规范 / 按线索检索 |
-| `ec_gate_metrics` | GATE-LOG 门度量记录与回看 |
+| `ec_artifact` | 生成交接物模板（落盘 + 登记指针）或校验结构；`path` 省略默认落 `.project_memory/tmp/<文件名>`，且**只能落在 `.project_memory/tmp/` 内**，越界返回 `ARTIFACT_OUTSIDE_TMP`；新增 `progress`（PROGRESS.md 五节 Goal/Done/Next/Open questions/Key facts） |
+| `ec_memory` | `.project_memory/` 建库（6 职责目录 + 3 根文件 + tmp）/ 写规范（一律强制五件套，无 `strict`、不退回来源+日期）/ `query` 按需读 / `recall` 写码前按线索检索全规范层返回 id/kind/file |
+| `ec_gate_metrics` | GATE-LOG 门度量记录与回看；GATE-LOG 落 `.project_memory/tmp/GATE-LOG.md`（每行一条 JSON，对齐 skill `core/gate-metrics.md` 六字段：日期/阶段/门/结果 拦住\|通过\|绕过/缺什么/处置；无兼容：旧 `.engineering-craft/gate-log.jsonl` 不再读取合并），`record` 支持 stage/missing/disposition 参数、outcome 只接受中文 拦住\|通过\|绕过（英文 blocked/passed 不识别） |
+
+**记忆内容规格与检索闭环**：每条陈述须为 `[KIND ID]`（RULE/FACT/DECISION/OPEN + 稳定 id）+ 正文 + `证据:` 行（文件路径 + 模式描述）+ `记录: YYYY-MM-DD · 实测|推断|用户约定`；禁本机绝对路径，事实等级与核实状态（待复核/已复核）正交分列，行号仅辅助。写入默认强制这套五件套；写码前用 `recall` 检索、把命中 id 列入 PLAN constraints，形成"规范落地 → 检索套用 → 按证据回写"的闭环。
 
 另有 `/ec` 命令（`status` / `next` / `gate` / `metrics` / `memory`）和会话头「工程面板」入口。面板显示阶段、门、计划和岗位树；需要你拍板时弹出确认卡。
 
 ## 配置
 
-- **项目路径是文本标签（不做存在性校验）**：`projectRoot` 既可以是本机路径，也可以是远端路径（如 `/remote/path/to/Project`）。插件不校验它是否存在、不在白名单内与否——工程在哪里、是不是远程、怎么挂载，由你/宿主记忆与 SSH 工具负责。状态与记忆就落在 `<projectRoot>/.engineering-craft/` 和 `<projectRoot>/.project_memory/`（远端路径需该路径在你的宿主环境可写，或由你同步）。POSIX 风格标签（`/` 开头）原样保留，不会被改写成 Windows 盘符；相对标签按当前目录（或可选 `EC_ALLOWED_ROOTS` 的第一项）解析。只有空标签返回 `INVALID_INPUT`。
-- **门规则与并行阈值**：通过插件 Config 覆盖（`gates` / `thresholds.minFilesForParallel`，后者是研发岗并行的最小单元数，默认 2）。
+- **项目路径是文本标签（不做存在性校验）**：`projectRoot` 既可以是本机路径，也可以是远端路径（如 `/remote/path/to/Project`）。插件不校验它是否存在、不在白名单内与否——工程在哪里、是不是远程、怎么挂载，由你/宿主记忆与 SSH 工具负责。状态与记忆就落在 `<projectRoot>/.ec-state/` 和 `<projectRoot>/.project_memory/`（无兼容：旧状态路径不读取、不迁移；GATE-LOG 落 `<projectRoot>/.project_memory/tmp/GATE-LOG.md`；远端路径需该路径在你的宿主环境可写，或由你同步）。POSIX 风格标签（`/` 开头）原样保留，不会被改写成 Windows 盘符；相对标签按当前目录解析（不读 `EC_ALLOWED_ROOTS`）。只有空标签返回 `INVALID_INPUT`。
+- **门规则与并行阈值**：通过插件 Config 覆盖，只保留 `gates` 与 `thresholds.minFilesForParallel`（语义为研发岗并行的最小单元数，默认 2）。已删除两个死配置 `paths.memoryDirName/artifactsRoot` 与 `minUnitsForWorkflow`。
 - **中英双语**：面板/确认卡文案走 DSH 系统 locale，在设置里切语言即时生效。
 
 ## 适用范围
@@ -90,7 +92,7 @@
 
 - 门是纪律不是内核强制，agent 仍需遵守工具返回。
 - 浏览器里的面板渲染、配置页可写性未在本会话实测，按 DSH 系统组件范式实现。
-- 状态写入新增的发布决策字段尚未升级 state schema 版本（记录性漂移，不影响使用）。
+- ~~状态写入新增的发布决策字段尚未升级 state schema 版本（记录性漂移，不影响使用）。~~ **已修**：state schema 已升至 **version 2**，新增 `progress` 交接物键与 `releaseDecision`（初值 null）、PLAN 单元支持 `constraints`；无兼容：v1 state 不识别、不迁移，版本不是 2 报 `STORAGE_UNAVAILABLE`。
 
 ## 项目文档
 
@@ -103,10 +105,10 @@
 
 ```bash
 node --check <每个 js>          # 语法检查（node >= 22）
-node --test tests/*.test.js     # 单元测试（node:test，零外部依赖，73 项）
+node --test tests/*.test.js     # 单元测试（node:test，零外部依赖，116 项）
 ```
 
-测试覆盖门规则纯函数、六岗位推进与研发岗并行三道门、路径穿越防御、交接物→门放行链路、Config 生产接线。
+测试覆盖门规则纯函数、六岗位推进与研发岗并行三道门、路径穿越防御、交接物→门放行链路（产物落 tmp）、Config 生产接线，以及工程记忆对齐回归（6 目录+3 根文件+tmp、所有权标记、五件套/硬约束、recall 检索闭环、state v2 严格校验（无 v1→v2 迁移、无旧路径兼容）、GATE-LOG 移位）。
 
 ## 许可证
 

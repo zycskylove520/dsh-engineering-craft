@@ -1,13 +1,16 @@
 # PLAN · engineering-craft DSH 工程流程套件
 
-> 执行计划（工作区临时产物，不进 `.project_memory/`）。
+> 执行计划（工作区临时产物，落 `.project_memory/tmp/PLAN.md`，tmp 不进规范层）。
 > 基线 ADR：`../engineering-craft-dsh-suite-adr.md`（G2 已放行，2026-11-23 修订：多 agent 常态、岗位顺序严格、DSH 特化）。
 > 本 PLAN 的每步都有可判定验收；未过门禁止进下一步。
+>
+> ⚠️ **2026-11-24 交付状态**：下方 P0–P5 清单为当时执行计划（保留原文），**现已全部交付**（116 测试全绿）。
+> 其中 `gate-rules.js` 实际落地为 `rules.js`；`sessionProjections`/`wire.view` 属废弃早期设计，已由 `state.json` + webServer/fetch 取代。当前行为以 README / CONTRACT / 源码为准。
 
 ## G0 · 交接物落盘（当前）
 - [x] ADR 草案 + 修订（architecture + DSH 特化角色流水线）
 - [x] PLAN.md（本文件）
-- [x] `.project_memory/` 工程记忆骨架（INDEX / architecture / conventions / project / open-questions）
+- [x] `.project_memory/` 工程记忆骨架（6 职责目录 architecture / conventions / api-contracts / data-model / testing / build + 3 根文件 INDEX.md / status.md / open-questions.md + tmp/ 执行产物区，全部建、内容可薄但不缺位；build 独立于 architecture）
 
 ## P0 · bundle 骨架
 - [ ] 建 `@local/dsh-engineering-craft` 包：package.json / cordis.patch.yml / locale{en,zh}.json / icon.svg / docs{DETAIL.md,preview.svg} / 空 index.js+client.js

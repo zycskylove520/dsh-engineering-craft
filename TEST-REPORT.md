@@ -15,6 +15,8 @@
 | `tests/boundary.test.js` | **本次新增** | 31 | 独立边界：四拒绝码分支、nextRole 部分落盘阻塞/严格顺序/全完成、safePathWithin 穿越拒绝、EcState version=1 与字段完整性 |
 | `tests/pipeline.test.js` | 研发岗 P0 修复新增 | 4 | create→指针登记→门放行集成链路回归 |
 
+> `[2026-11-24 注]` §1 用例数为当时快照（boundary 31 / pipeline 4），**已过时**。当前按源码统计为 **116 项**：boundary 45 / memory-alignment 27 / parallel 12 / pipeline 7 / rules 25；以最新 `node --test tests/*.test.js` 输出为准。
+
 - 新增测试文件：`tests/boundary.test.js`（唯一由测试岗落盘的测试文件）。
 - 临时脚本：`_ec_probe.mjs` / `_ec_smoke.mjs` / `_ec_pending_probe.mjs` / `_ec_e2e_final.mjs` 全部**跑完即删**，仓库无残留（实测：`find . -maxdepth 1 -name '_ec_*'` 无输出）。
 - 实现代码 9 个 js（index/client/gate-service/rules/tools/command/artifacts/memory/metrics）**零改动**。
@@ -308,4 +310,24 @@ PROBE DONE / PROBE2 DONE
 - **改动**：`resolveAllowedRoot` 从白名单校验改为文本标签规范化；新增 `ec-path.js` 按标签形态选 path 模块；gate-service/artifacts/memory/metrics/tools/command/index 的路径调用点同步。历史 §4.1「PATH_OUT_OF_ROOT = 白名单越界」记录保留，语义已变更为「交接物路径越出 projectRoot 标签的防 .. 穿越」，宿主白名单校验已移除。
 - **复跑结果（实测）**：`node --test tests/*.test.js` → **80/80 全绿**（tests 80 / pass 80 / fail 0）。新增断言：远端 POSIX 标签 `/remote/...` 原样保留不被改写盘符、工作区外路径作为标签放行、空标签仍拒、`statePathOf` 落在 `<标签>/.engineering-craft/state.json`。
 - **端到端探针（实测）**：6 个入口（ec_stage query/next-role、ec_artifact validate、ec_memory query、ec_gate_metrics list、runEcCommand status）传 `/remote/path/to/Project` 全部 `ok=true`，零 `PATH_OUT_OF_ROOT`。
-- **HMR 边界（已知）**：host 工具模块不热重载，重启 DSH 前运行中的 `ec_stage` 仍报旧错误，属预期；改动已在磁盘与符号链接源（D:\Project\dsh-engineering-craft）确认。
+- **HMR 边界（已知）**：host 工具模块不热重载，重启 DSH 前运行中的 `ec_stage` 仍报旧错误，属预期（见下方 2026-11-24 对齐修订）；改动已在磁盘与符号链接源（<仓库路径>，原文含本机绝对路径已脱敏）确认。
+
+---
+
+## 2026-11-24 对齐修订（不重写上文历史记录）
+
+> 按不遗忘原则，历史实测数据与结论保持原文；本节只登记源码对齐「engineering-craft skill 工程记忆系统定稿」后的变更事实，供后续测试参考。**本节不代表新一轮测试实测；本轮文档同步未运行任何测试。**
+
+- 源码变更需后续测试关注的新面：`memory.js` 骨架改为 6 职责目录（architecture/conventions/api-contracts/data-model/testing/build，build 独立于 architecture）+ 3 根文件（INDEX.md/status.md/open-questions.md）+ tmp/；所有权标记改为 `.project_memory/` 内空文件 `.engineering-craft`（无标记目录拒写降级 `.project_memory_engineer/`，旧 `.engineering-craft-marker` 删除；与项目根同名状态目录、GATE-LOG 原位互不冲突）。
+- `ec_memory` 新增 `recall`（全规范层检索返回 id/kind/file，bounded 最多 30 条）与 `file` 参数，layer 枚举扩展；写入一律强制五件套校验（`[KIND ID]`+陈述+证据+记录日期·等级，禁本机绝对路径，等级与核实状态正交；无 `strict`，不退回来源+日期）。历史 §2「memory init/write/来源日期校验/query」的覆盖描述以旧行为为准，新增 recall/五件套尚未在本报告实测。
+- `ec_artifact` 的 `path` 改可选（默认 `.project_memory/tmp/<文件名>`），新增 `progress`（PROGRESS.md 五节 Goal/Done/Next/Open questions/Key facts），PLAN 模板加「检索套用约束」与 constraints。
+- state schema 升 version 2（新增 progress 键共 9 键、releaseDecision=null、PLAN 单元 constraints）；无兼容：v1 不识别、不迁移，版本不是 2 报 `STORAGE_UNAVAILABLE`——上文 §2/§3「version=1、8 交接物键、version≠1 抛错」等历史记录是当时实测，如需覆盖请按 v2 重测。
+- Config 删除死配置 `paths.memoryDirName/artifactsRoot`、`minUnitsForWorkflow`，只留 `gates` 与 `thresholds.minFilesForParallel`（最小并行单元数，默认 2）；多 agent 措辞改为「默认多 agent；只有一个不可分单元时单岗位顺序执行亦合规（非失败）」，无单 agent 降级。
+
+### 本轮追加（2026-11-24 收尾 · 状态目录改名 / GATE-LOG 移位 / 产物强制 tmp）
+
+> lead 已在源码落地、116/116 测试通过；本节仅同步文档描述，**本轮文档同步未运行任何测试**。上文历史实测记录保持原文。上文「与项目根同名状态目录、GATE-LOG 原位互不冲突」的说法已作废，以本节为准。兼容已彻底移除。
+
+- **状态目录改名**：`.engineering-craft/` → **`.ec-state/`**（state.json 新路径 `projectRoot/.ec-state/state.json`）。原因：`.engineering-craft` 按 skill 定义是**记忆目录内的空文件 marker**，不能同时当状态目录名；改名后名字冲突已消除。**无兼容**：旧 `.engineering-craft/state.json` 不读取、不迁移，没有 `legacyStatePathOf`；版本不是 2 直接报 `STORAGE_UNAVAILABLE`。**上文 §9.6 记录 `statePathOf` 落在 `<标签>/.engineering-craft/state.json` 等旧路径实测记录保留原文，以新路径 `.ec-state/state.json` 为准。**
+- **GATE-LOG 移位**：`.engineering-craft/gate-log.jsonl` → **`.project_memory/tmp/GATE-LOG.md`**，对齐 skill `core/gate-metrics.md` 六字段（日期/阶段/门/结果 拦住\|通过\|绕过/缺什么/处置），每行一条 JSON；**无兼容**：旧 gate-log.jsonl 不再读取合并（不 list 并入、不触发写盘）。`ec_gate_metrics` record 新增 stage/missing/disposition 参数，outcome 只接受中文 拦住\|通过\|绕过（英文 blocked/passed 不识别）。
+- **产物强制 tmp**：`ec_artifact` 的 `path` **只能落在 `.project_memory/tmp/` 内**，传项目根等其他位置返回新错误码 `ARTIFACT_OUTSIDE_TMP`（不再是"可选覆盖"）；不传 path 默认 tmp/。上文历史覆盖描述（path 可选覆盖）以本节为准。

@@ -28,6 +28,7 @@ window.__ModuleLoader__.load({
         'panel.nextRole': '下一岗位',
         'panel.blockedBy': '阻塞',
         'panel.missingArtifacts': '缺失交接物',
+        'panel.handoffs': '交接物清单',
         'panel.plan': '计划',
         'panel.pipeline': '岗位流水线',
         'panel.refresh': '刷新',
@@ -44,6 +45,7 @@ window.__ModuleLoader__.load({
         'role.architect': '架构',
         'role.developer': '研发',
         'role.developerParallel': '研发 ×{n}（并行）',
+        'panel.parallelHint': '并行 {n} 单元',
         'role.tester': '测试',
         'role.reviewer': '评审',
         'role.ops': '运维',
@@ -57,6 +59,7 @@ window.__ModuleLoader__.load({
         'panel.nextRole': 'Next role',
         'panel.blockedBy': 'blocked by',
         'panel.missingArtifacts': 'Missing handoffs',
+        'panel.handoffs': 'Handoffs',
         'panel.plan': 'Plan',
         'panel.pipeline': 'Role pipeline',
         'panel.refresh': 'Refresh',
@@ -73,6 +76,7 @@ window.__ModuleLoader__.load({
         'role.architect': 'Architect',
         'role.developer': 'Developer',
         'role.developerParallel': 'Developer ×{n} (parallel)',
+        'panel.parallelHint': '{n} units in parallel',
         'role.tester': 'Tester',
         'role.reviewer': 'Reviewer',
         'role.ops': 'Operations',
@@ -81,6 +85,61 @@ window.__ModuleLoader__.load({
 
     const ROLE_KEYS = ['product', 'architect', 'developer', 'tester', 'reviewer', 'ops']
     const GATES = ['G1', 'G2', 'G3']
+    // 交接物 → 岗位（与 gate-service.ARTIFACT_TO_ROLE 一致；progress 属研发接力，单列）。
+    const ROLE_ARTIFACTS = {
+      product: ['prd'],
+      architect: ['adr', 'contract'],
+      developer: ['plan', 'progress'],
+      tester: ['testReport'],
+      reviewer: ['brief', 'findings'],
+      ops: ['release'],
+    }
+
+    // 语义色 token：优先宿主 alias 主题色，缺时用 color-mix 混出玻璃质感，跟着主题走。
+    const ACCENT = 'var(--dsw-alias-fg-accent, var(--dsw-alias-text-accent, #7aa2f7))'
+    const TRACK = 'var(--dsw-alias-border-subtle, rgba(136,136,136,.35))'
+    const CYAN = 'var(--dsw-alias-fg-accent, #4dd0e1)'
+
+    // 一次性注入 keyframes（内联 style 写不了动画；用唯一 id 防重复）。
+    // 无 document 的环境（测试/SSR）安全跳过。
+    let stylesInjected = false
+    function ensureStyles() {
+      if (stylesInjected || typeof document === 'undefined' || !document.head) return
+      stylesInjected = true
+      const id = 'dsh-engcraft-ui-styles'
+      if (document.getElementById(id)) return
+      const style = document.createElement('style')
+      style.id = id
+      style.textContent = [
+        '@keyframes ec-rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}',
+        '@keyframes ec-pop{0%{transform:scale(.5);opacity:0}70%{transform:scale(1.15)}100%{transform:scale(1);opacity:1}}',
+        '@keyframes ec-flow{to{background-position:24px 0}}',
+        '@keyframes ec-pulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb, ' + ACCENT + ' 55%, transparent)}60%{box-shadow:0 0 0 7px color-mix(in srgb, ' + ACCENT + ' 0%, transparent)}}',
+        '@keyframes ec-float{0%,100%{transform:translate3d(0,0,0)}50%{transform:translate3d(12px,-9px,0)}}',
+        '@keyframes ec-sweep{0%{background-position:200% 0}100%{background-position:-200% 0}}',
+        '@keyframes ec-pop-pulse{0%{transform:scale(.5);opacity:0}70%{transform:scale(1.15)}100%{transform:scale(1);opacity:1}}',
+        // 卡片大范围极光横扫（纯 background-position 动画，任何 Chromium 都支持；不用 @property/mask）
+        '@keyframes ec-aurora{0%{background-position:-160% 0}100%{background-position:260% 0}}',
+        '.ec-rise{animation:ec-rise .45s cubic-bezier(.2,.8,.2,1) both}',
+        '.ec-pop{animation:ec-pop .5s cubic-bezier(.2,.9,.3,1.3) both}',
+        '.ec-flow{background-size:24px 100%;animation:ec-flow 1s linear infinite}',
+        // 卡片极光带：一条斜向高光从左扫到右，盖在卡片上（宽 60%，逐渐淡出）
+        '.ec-card::before{content:"";position:absolute;inset:0;border-radius:16px;pointer-events:none;'
+          + 'background:linear-gradient(115deg,transparent 35%,color-mix(in srgb, ' + CYAN + ' 18%, transparent) 48%,'
+          + 'color-mix(in srgb, ' + ACCENT + ' 22%, transparent) 52%,transparent 65%);'
+          + 'background-size:220% 100%;animation:ec-aurora 6s ease-in-out infinite;opacity:.55}',
+        // 漂浮光斑（右上角，柔和 blur，不遮左侧阶段文字）
+        '.ec-card::after{content:"";position:absolute;width:170px;height:170px;right:-45px;top:-75px;border-radius:50%;'
+          + 'background:radial-gradient(circle,color-mix(in srgb, ' + ACCENT + ' 24%, transparent),transparent 70%);'
+          + 'filter:blur(10px);animation:ec-float 11s ease-in-out infinite;pointer-events:none}',
+        // 激活/分叉节点的脉冲光环（先弹入再持续脉冲）
+        '.ec-pop-pulse{animation:ec-pop .5s cubic-bezier(.2,.9,.3,1.3) both,ec-pulse 2s ease-out .5s infinite}',
+        // 通过门药丸的扫光
+        '.ec-sweep{background-size:200% 100%;animation:ec-sweep 3.2s linear infinite}',
+        '@media(prefers-reduced-motion:reduce){.ec-rise,.ec-pop,.ec-flow,.ec-card::before,.ec-card::after,.ec-pop-pulse,.ec-sweep{animation:none!important}}',
+      ].join('')
+      document.head.appendChild(style)
+    }
 
     // locale seat：apply 里注入；组件通过 useT() 订阅 revision，语言切换即时重渲染。
     // 稳定的 noop 后备，保证 hook 无条件调用（符合 hooks 规则），locale 缺失时退化为 zh 字典。
@@ -144,31 +203,220 @@ window.__ModuleLoader__.load({
       }
     }
 
+    // 全部配色走 --dsw-alias-* theme token（fallback 仅为 token 缺失时的中性色），跟随主题。
     const panelStyle = {
-      padding: '16px',
-      color: 'var(--dsw-alias-fg-default, inherit)',
+      padding: '18px 20px',
+      color: 'var(--dsw-alias-fg-default, #e6e6e6)',
       background: 'var(--dsw-alias-bg-surface, transparent)',
       fontFamily: 'var(--dsw-alias-font-sans, inherit)',
+      fontSize: '13px', lineHeight: 1.5,
     }
     const cardStyle = {
-      padding: '12px 16px',
-      border: '1px solid var(--dsw-alias-border-subtle, #8884)',
-      borderRadius: '8px',
-      background: 'var(--dsw-alias-bg-surface, inherit)',
+      position: 'relative', overflow: 'hidden',
+      padding: '18px 20px',
+      border: '1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,.1))',
+      borderRadius: '16px',
+      // 大卡打底也用半透明层，让下层分区卡更贴合 dsh-context 的层叠质感
+      background:
+        `radial-gradient(circle at 6% 0%, color-mix(in srgb, ${ACCENT} 10%, transparent), transparent 46%),`
+        + `radial-gradient(circle at 100% 100%, color-mix(in srgb, ${CYAN} 8%, transparent), transparent 42%),`
+        + 'var(--dsw-alias-bg-layer-1, rgba(0,0,0,.28))',
       color: 'var(--dsw-alias-fg-default, inherit)',
+      boxShadow: `0 8px 30px rgba(0,0,0,.2), inset 0 1px 0 var(--dsw-alias-border-subtle, rgba(255,255,255,.06))`,
+      fontFamily: 'var(--dsw-alias-font-sans, inherit)',
     }
-    const buttonStyle = {
-      padding: '4px 12px',
-      marginRight: '8px',
+    const headStyle = {
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      gap: '10px', marginBottom: '16px',
+    }
+    const titleStyle = {
+      margin: 0, fontSize: '16px', fontWeight: 700, letterSpacing: '.3px',
+      display: 'flex', alignItems: 'center', gap: '8px',
+    }
+    const iconDotStyle = {
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      width: '28px', height: '28px', borderRadius: '9px',
+      background: `linear-gradient(135deg, color-mix(in srgb, ${ACCENT} 30%, transparent), color-mix(in srgb, ${CYAN} 18%, transparent))`,
+      color: ACCENT, fontSize: '15px',
+      boxShadow: `0 0 0 1px color-mix(in srgb, ${ACCENT} 28%, transparent), 0 2px 10px color-mix(in srgb, ${ACCENT} 20%, transparent)`,
+    }
+    const iconBtnStyle = {
+      width: '28px', height: '28px', padding: 0,
       border: '1px solid var(--dsw-alias-border-subtle, #8884)',
-      borderRadius: '6px',
-      background: 'var(--dsw-alias-bg-accent, transparent)',
-      color: 'var(--dsw-alias-fg-accent, inherit)',
-      cursor: 'pointer',
+      borderRadius: '8px', background: 'transparent',
+      color: 'var(--dsw-alias-fg-muted, var(--dsw-alias-fg-default, inherit))',
+      fontSize: '15px', cursor: 'pointer', transition: 'transform .15s, opacity .15s',
     }
-
+    const heroStyle = {
+      display: 'flex', gap: '10px', marginBottom: '4px',
+      padding: '14px 16px', borderRadius: '12px',
+      // 更亮一层的玻璃卡（layer-2），浮在大卡之上
+      background: 'var(--dsw-alias-bg-layer-2, rgba(0,0,0,.42))',
+      border: '1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,.1))',
+      boxShadow: '0 3px 14px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.04)',
+    }
+    const heroCellStyle = { flex: 1, minWidth: 0 }
+    const heroLabelStyle = {
+      fontSize: '11px', opacity: .6, textTransform: 'uppercase',
+      letterSpacing: '.6px', marginBottom: '6px',
+    }
+    const badgeStyle = {
+      display: 'inline-block', padding: '4px 12px', borderRadius: '999px',
+      background: `linear-gradient(120deg, color-mix(in srgb, ${ACCENT} 16%, transparent), color-mix(in srgb, ${CYAN} 10%, transparent))`,
+      color: ACCENT,
+      border: `1px solid color-mix(in srgb, ${ACCENT} 32%, transparent)`,
+      fontSize: '12px', fontWeight: 700,
+      boxShadow: `inset 0 1px 0 color-mix(in srgb, ${ACCENT} 20%, transparent)`,
+    }
+    // 阶段值：静态不闪烁，用前景主色保证清晰可读（不依赖可能偏暗的 accent）
+    const stageBadgeStyle = {
+      display: 'inline-block', padding: '5px 13px', borderRadius: '999px',
+      background: `linear-gradient(120deg, color-mix(in srgb, ${ACCENT} 22%, transparent), color-mix(in srgb, ${CYAN} 14%, transparent))`,
+      color: 'var(--dsw-alias-fg-default, #e6e6e6)',
+      border: `1px solid color-mix(in srgb, ${ACCENT} 40%, transparent)`,
+      fontSize: '14px', fontWeight: 700, letterSpacing: '.2px',
+      boxShadow: `inset 0 1px 0 color-mix(in srgb, ${ACCENT} 20%, transparent)`,
+    }
+    const nextRoleTextStyle = { fontSize: '14px', fontWeight: 600 }
+    const blockedStyle = { fontSize: '11px', opacity: .7, marginTop: '3px' }
+    // 分区小卡：半透明分层底色（dsh-context 的 layer-1/2 打法），深色下即一层层黑色玻璃卡
+    const sectionStyle = {
+      marginTop: '12px', padding: '12px 14px', borderRadius: '12px',
+      background: 'var(--dsw-alias-bg-layer-1, rgba(0,0,0,.32))',
+      border: '1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,.08))',
+      boxShadow: 'inset 0 1px 0 var(--dsw-alias-border-subtle, rgba(255,255,255,.05)), 0 2px 10px rgba(0,0,0,.12)',
+    }
+    const sectionTitleStyle = {
+      fontSize: '11px', opacity: .6, textTransform: 'uppercase',
+      letterSpacing: '.6px', marginBottom: '9px',
+    }
+    const gateRowStyle = { display: 'flex', gap: '8px', flexWrap: 'wrap' }
+    const gateOnStyle = {
+      padding: '5px 13px', borderRadius: '999px', fontSize: '12px', fontWeight: 700,
+      background: `linear-gradient(120deg, color-mix(in srgb, ${ACCENT} 26%, transparent), color-mix(in srgb, ${CYAN} 14%, transparent))`,
+      color: ACCENT,
+      border: `1px solid color-mix(in srgb, ${ACCENT} 45%, transparent)`,
+      boxShadow: `0 2px 10px color-mix(in srgb, ${ACCENT} 22%, transparent)`,
+    }
+    const gateOffStyle = {
+      padding: '5px 12px', borderRadius: '999px', fontSize: '12px',
+      background: 'transparent', opacity: .65,
+      border: '1px solid var(--dsw-alias-border-subtle, #8884)',
+    }
+    const stepRowStyle = { display: 'flex', alignItems: 'flex-start', width: '100%' }
+    const stepItemStyle = {
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
+      gap: '6px', minWidth: '48px', textAlign: 'center',
+    }
+    const stepDotBase = {
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      width: '26px', height: '26px', borderRadius: '50%',
+      fontSize: '12px', fontWeight: 700, boxSizing: 'border-box',
+    }
+    const stepDoneStyle = {
+      ...stepDotBase,
+      background: `linear-gradient(135deg, color-mix(in srgb, ${ACCENT} 32%, transparent), color-mix(in srgb, ${CYAN} 20%, transparent))`,
+      color: ACCENT,
+      border: `1px solid color-mix(in srgb, ${ACCENT} 50%, transparent)`,
+      boxShadow: `0 0 12px color-mix(in srgb, ${ACCENT} 24%, transparent)`,
+    }
+    const stepActiveStyle = {
+      ...stepDotBase,
+      width: '30px', height: '30px',
+      background: `radial-gradient(circle at 35% 30%, color-mix(in srgb, ${CYAN} 32%, transparent), color-mix(in srgb, ${ACCENT} 20%, transparent))`,
+      color: ACCENT,
+      border: `2px solid ${ACCENT}`,
+      boxShadow: `0 0 0 4px color-mix(in srgb, ${ACCENT} 16%, transparent), 0 0 16px color-mix(in srgb, ${ACCENT} 50%, transparent)`,
+    }
+    const stepPendingStyle = {
+      ...stepDotBase,
+      background: 'transparent', opacity: .5,
+      border: '1px solid var(--dsw-alias-border-subtle, #8884)',
+    }
+    const stepLabelBase = { fontSize: '11px', whiteSpace: 'nowrap', opacity: .6 }
+    const stepLabelActive = { ...stepLabelBase, fontWeight: 700, opacity: 1, color: ACCENT }
+    const connectorBase = { flex: 1, height: '2px', margin: '13px 4px 0', background: TRACK, opacity: .5, borderRadius: '2px' }
+    const connectorDone = {
+      ...connectorBase, opacity: 1,
+      background: `linear-gradient(90deg, color-mix(in srgb, ${ACCENT} 70%, transparent), color-mix(in srgb, ${CYAN} 70%, transparent), color-mix(in srgb, ${ACCENT} 70%, transparent))`,
+    }
+    // 并行岗位：一个大节点下挂多个并行小节点（分叉），用竖线汇聚
+    const forkWrapStyle = {
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
+      gap: '5px', minWidth: '56px', textAlign: 'center',
+    }
+    const forkNodeStyle = {
+      ...stepDotBase,
+      width: '30px', height: '30px',
+      background: `radial-gradient(circle at 35% 30%, color-mix(in srgb, ${CYAN} 32%, transparent), color-mix(in srgb, ${ACCENT} 20%, transparent))`,
+      color: ACCENT,
+      border: `2px solid ${ACCENT}`,
+      boxShadow: `0 0 0 4px color-mix(in srgb, ${ACCENT} 16%, transparent), 0 0 16px color-mix(in srgb, ${ACCENT} 45%, transparent)`,
+    }
+    const forkBranchRowStyle = {
+      display: 'flex', gap: '4px', justifyContent: 'center',
+      paddingTop: '4px', borderTop: `1px dashed color-mix(in srgb, ${ACCENT} 45%, transparent)`,
+      maxWidth: '84px', flexWrap: 'wrap',
+    }
+    const forkLeafStyle = {
+      padding: '2px 6px', borderRadius: '6px', fontSize: '10px',
+      fontFamily: 'var(--dsw-alias-font-mono, monospace)',
+      background: `color-mix(in srgb, ${ACCENT} 18%, transparent)`,
+      color: ACCENT,
+      border: `1px solid color-mix(in srgb, ${ACCENT} 40%, transparent)`,
+      whiteSpace: 'nowrap',
+    }
+    const artifactGridStyle = { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }
+    const artifactGroupStyle = {
+      padding: '9px 11px', borderRadius: '10px',
+      background: 'var(--dsw-alias-bg-layer-2, rgba(0,0,0,.3))',
+      border: '1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,.08))',
+      boxShadow: 'inset 0 1px 0 rgba(255,255,255,.04)',
+    }
+    const artifactGroupHeadStyle = {
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      fontSize: '11px', fontWeight: 700, marginBottom: '7px', opacity: .9,
+    }
+    const artifactCountStyle = { fontSize: '10px', opacity: .6, fontFamily: 'var(--dsw-alias-font-mono, monospace)' }
+    const artifactItemsStyle = { display: 'flex', gap: '5px', flexWrap: 'wrap' }
+    const artifactDoneStyle = {
+      padding: '3px 8px', borderRadius: '6px', fontSize: '10px',
+      fontFamily: 'var(--dsw-alias-font-mono, monospace)',
+      background: `color-mix(in srgb, ${ACCENT} 20%, transparent)`,
+      color: ACCENT,
+      border: `1px solid color-mix(in srgb, ${ACCENT} 40%, transparent)`,
+    }
+    const artifactMissingStyle = {
+      padding: '3px 8px', borderRadius: '6px', fontSize: '10px',
+      fontFamily: 'var(--dsw-alias-font-mono, monospace)',
+      background: 'transparent', opacity: .75,
+      border: '1px dashed var(--dsw-alias-border-subtle, #8884)',
+    }
+    const planItemStyle = {
+      display: 'flex', alignItems: 'center', gap: '8px',
+      padding: '6px 0', borderBottom: '1px solid var(--dsw-alias-border-subtle, #8883)',
+    }
+    const mutedStyle = { opacity: .55 }
+    const confirmTitleStyle = { fontSize: '15px', fontWeight: 700, marginBottom: '14px' }
+    const confirmBtnBase = {
+      padding: '7px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: 600,
+      cursor: 'pointer', transition: 'opacity .15s',
+    }
+    const confirmApproveStyle = {
+      ...confirmBtnBase,
+      background: 'var(--dsw-alias-bg-accent, rgba(127,127,127,.2))',
+      color: 'var(--dsw-alias-fg-accent, inherit)',
+      border: '1px solid var(--dsw-alias-bg-accent, transparent)',
+    }
+    const confirmRejectStyle = {
+      ...confirmBtnBase,
+      background: 'transparent',
+      color: 'var(--dsw-alias-fg-default, inherit)',
+      border: '1px solid var(--dsw-alias-border-subtle, #8884)',
+    }
     /** 主面板：显示阶段 / 三门 / PLAN / 六岗位树；只读 EcState。 */
     function EcPanel(props) {
+      ensureStyles()
       const t = useT()
       const root = guessProjectRoot(props)
       const [state, setState] = useState(null)
@@ -196,35 +444,143 @@ window.__ModuleLoader__.load({
       if (error) return h('div', { style: panelStyle }, h('p', null, `${t('panel.title')}：${error}`))
       if (!state) return h('div', { style: panelStyle }, h('p', null, `${t('panel.title')}：${t('panel.loading')}`))
 
-      const stage = h('p', null, `${t('panel.stage')}：${state.stage ?? '-'}`)
-      const gates = h('div', null,
-        h('strong', null, `${t('panel.gates')}：`),
-        h('span', null, GATES.map((g) => `${g}=${state.gates?.[g]?.passed ? t('panel.gatePassed') : t('panel.gatePending')}`).join('  ')),
-      )
-      const role = h('p', null, `${t('panel.nextRole')}：${state.nextRole ?? state.pipeline?.role ?? '-'}${state.blockedBy ? `（${t('panel.blockedBy')}：${state.blockedBy}）` : ''}`)
-      const missing = h('p', null, `${t('panel.missingArtifacts')}：${Object.entries(state.artifacts ?? {}).filter(([, v]) => !v).map(([k]) => k).join(', ') || t('panel.none')}`)
-      const plan = h('ul', null, (state.plan ?? []).map((u) => h('li', { key: u.id }, `${u.id} ${u.target} [${u.status}]`)))
+      const stageName = state.stage ?? '-'
+      const nextRole = state.nextRole ?? state.pipeline?.role ?? null
       const parallelRoles = Array.isArray(state.parallelRoles) ? state.parallelRoles : []
-      const pipeline = h('ol', null, ROLE_KEYS.map((key) => {
-        const handoff = state.pipeline?.handoffs?.[key]
-        // 形态 B 下 developer 行显示并行单元数；其余岗位与其他状态一律不改。
-        const label = key === 'developer' && parallelRoles.length > 0
-          ? t('role.developerParallel').replace('{n}', String(parallelRoles.length))
-          : t(`role.${key}`)
-        return h('li', { key }, `${label}${handoff ? ' ✓' : ''}`)
+      const nextLabel = nextRole === 'developer' && parallelRoles.length > 0
+        ? t('role.developerParallel').replace('{n}', String(parallelRoles.length))
+        : (nextRole ? t(`role.${nextRole}`) : t('panel.none'))
+      const blocked = state.blockedBy
+
+      // 阶段门药丸：过的亮、没过的暗
+      const gatePills = h('div', { style: gateRowStyle }, GATES.map((g) => {
+        const passed = Boolean(state.gates?.[g]?.passed)
+        return h('span', {
+          key: g,
+          className: passed ? 'ec-sweep' : undefined,
+          title: passed ? t('panel.gatePassed') : t('panel.gatePending'),
+          style: passed ? gateOnStyle : gateOffStyle,
+        }, `${g} ${passed ? '✓' : '○'}`)
       }))
 
-      return h('div', { style: panelStyle },
-        h('h3', null, t('panel.title')),
-        stage, gates, role, missing,
-        h('h4', null, t('panel.plan')), plan,
-        h('h4', null, t('panel.pipeline')), pipeline,
-        h('button', { style: buttonStyle, onClick: () => setVersion((v) => v + 1) }, t('panel.refresh')),
+      // 岗位流水线步骤条：以当前 nextRole 定位 active，已产出交接物的标 done。
+      // 研发岗在形态 B（mode==='B' 且并行单元非空）时画成分叉节点：主节点下挂多个并行叶子。
+      const modeB = state.mode === 'B' && nextRole === 'developer' && parallelRoles.length > 0
+      const roleIdx = Math.max(0, ROLE_KEYS.indexOf(nextRole))
+      const steps = []
+      ROLE_KEYS.forEach((key, i) => {
+        const handoff = state.pipeline?.handoffs?.[key]
+        const isDone = Boolean(handoff) || (nextRole && i < roleIdx)
+        const isActive = nextRole ? i === roleIdx : false
+        const isFork = modeB && key === 'developer'
+        const circleStyle = isActive ? stepActiveStyle : (isDone ? stepDoneStyle : stepPendingStyle)
+        const idxLabel = isDone && !isActive ? '✓' : String(i + 1)
+        if (isFork) {
+          // 分叉节点：主圆点 + 下方并行单元叶子条
+          steps.push(h('div', { key: key, style: forkWrapStyle },
+            h('div', { className: 'ec-pop-pulse', style: forkNodeStyle }, '⚡'),
+            h('div', { style: isActive ? stepLabelActive : stepLabelBase },
+              t('role.developerParallel').replace('{n}', String(parallelRoles.length))),
+            h('div', { style: forkBranchRowStyle }, parallelRoles.map((u) =>
+              h('span', { key: String(u), style: forkLeafStyle }, String(u)))),
+          ))
+        } else {
+          steps.push(h('div', { key: key, style: stepItemStyle },
+            h('div', { className: isActive ? 'ec-pop-pulse' : undefined, style: circleStyle }, idxLabel),
+            h('div', { style: isActive ? stepLabelActive : stepLabelBase }, t(`role.${key}`)),
+          ))
+        }
+        if (i < ROLE_KEYS.length - 1) {
+          const connDone = isDone && i + 1 < roleIdx
+          steps.push(h('div', {
+            key: `${key}-conn`,
+            className: connDone ? 'ec-flow' : undefined,
+            style: connDone ? connectorDone : connectorBase,
+          }))
+        }
+      })
+
+      // 交接物：按岗位分组的小卡，每项 ✓ 已交 / ○ 缺失（替代原来的平铺 chips）
+      const artifacts = state.artifacts ?? {}
+      const artifactCards = h('div', { style: artifactGridStyle }, ROLE_KEYS.map((role) => {
+        const keys = ROLE_ARTIFACTS[role]
+        const doneCount = keys.filter((k) => artifacts[k]).length
+        return h('div', { key: role, style: artifactGroupStyle },
+          h('div', { style: artifactGroupHeadStyle },
+            h('span', null, t(`role.${role}`)),
+            h('span', { style: artifactCountStyle }, `${doneCount}/${keys.length}`),
+          ),
+          h('div', { style: artifactItemsStyle }, keys.map((k) => {
+            const done = Boolean(artifacts[k])
+            return h('span', {
+              key: k, title: k,
+              style: done ? artifactDoneStyle : artifactMissingStyle,
+            }, `${done ? '✓' : '○'} ${k}`)
+          })),
+        )
+      }))
+
+      // 计划单元列表
+      const plans = Array.isArray(state.plan) && state.plan.length
+        ? h('div', null, state.plan.map((u) => h('div', { key: u.id, style: planItemStyle },
+          h('span', { style: badgeStyle }, u.id),
+          h('span', null, u.target ?? ''),
+          h('span', { style: mutedStyle }, `[${u.status ?? '-'}]`),
+        )))
+        : h('span', { style: mutedStyle }, t('panel.none'))
+
+      return h('div', { className: 'ec-card', style: cardStyle },
+        // 头部：标题 + 刷新
+        h('div', { style: headStyle },
+          h('h3', { style: titleStyle },
+            h('span', { className: 'ec-pop', style: iconDotStyle }, '⚙'),
+            t('panel.title'),
+          ),
+          h('button', {
+            style: iconBtnStyle, title: t('panel.refresh'), 'aria-label': t('panel.refresh'),
+            onClick: () => setVersion((v) => v + 1),
+            onMouseEnter: (e) => { e.currentTarget.style.transform = 'rotate(45deg)' },
+            onMouseLeave: (e) => { e.currentTarget.style.transform = '' },
+          }, '⟳'),
+        ),
+        // Hero：阶段 + 下一岗位（错落入场）
+        h('div', { className: 'ec-rise', style: { ...heroStyle, animationDelay: '0ms' } },
+          h('div', { style: heroCellStyle },
+            h('div', { style: heroLabelStyle }, t('panel.stage')),
+            h('span', { style: stageBadgeStyle }, stageName),
+          ),
+          h('div', { style: heroCellStyle },
+            h('div', { style: heroLabelStyle }, t('panel.nextRole')),
+            h('div', { style: nextRoleTextStyle }, nextLabel),
+            blocked ? h('div', { style: blockedStyle }, `${t('panel.blockedBy')}：${blocked}`) : null,
+          ),
+        ),
+        // 阶段门
+        h('div', { className: 'ec-rise', style: { ...sectionStyle, animationDelay: '60ms' } },
+          h('div', { style: sectionTitleStyle }, t('panel.gates')),
+          gatePills,
+        ),
+        // 岗位流水线步骤条
+        h('div', { className: 'ec-rise', style: { ...sectionStyle, animationDelay: '120ms' } },
+          h('div', { style: sectionTitleStyle }, t('panel.pipeline')),
+          h('div', { style: stepRowStyle }, steps),
+        ),
+        // 缺失交接物
+        h('div', { className: 'ec-rise', style: { ...sectionStyle, animationDelay: '180ms' } },
+          h('div', { style: sectionTitleStyle }, t('panel.handoffs')),
+          artifactCards,
+        ),
+        // 计划
+        h('div', { className: 'ec-rise', style: { ...sectionStyle, animationDelay: '240ms' } },
+          h('div', { style: sectionTitleStyle }, t('panel.plan')),
+          plans,
+        ),
       )
     }
 
     /** 人拍板确认卡：只有 state.pendingConfirm 非空时才显示。 */
     function EcConfirmCard(props) {
+      ensureStyles()
       const t = useT()
       const root = guessProjectRoot(props)
       const [state, setState] = useState(null)
@@ -256,23 +612,29 @@ window.__ModuleLoader__.load({
       }, [root])
       if (!pending) return null
 
-      const title = pending.gate === 'go-no-go' ? t('confirm.goNoGo') : `${t('confirm.title')}：${pending.gate}`
-      return h('div', { style: cardStyle },
-        h('strong', null, title),
-        h('div', null,
-          h('button', { style: buttonStyle, onClick: () => submit('approve', pending.gate) }, t('confirm.approve')),
-          h('button', { style: buttonStyle, onClick: () => submit('reject', pending.gate) }, t('confirm.reject')),
+      const isGoNoGo = pending.gate === 'go-no-go'
+      const title = isGoNoGo ? t('confirm.goNoGo') : `${t('confirm.title')}：${pending.gate}`
+      return h('div', { style: { ...cardStyle, borderColor: 'var(--dsw-alias-bg-accent, #888)' } },
+        h('div', { style: headStyle },
+          h('div', { style: confirmTitleStyle },
+            h('span', { style: { ...iconDotStyle, background: 'var(--dsw-alias-bg-accent, rgba(127,127,127,.2))' } }, isGoNoGo ? '🚀' : '✋'),
+            ' ', title,
+          ),
         ),
-      )
-    }
-
-    /** header.actions 的轻量入口按钮：点击弹出/聚焦工程面板（main slot 由 DSH keyed 机制呈现）。 */
-    function EcPanelButton(props) {
-      const t = useT()
-      const [open, setOpen] = useState(false)
-      return h('div', null,
-        h('button', { style: buttonStyle, onClick: () => setOpen((v) => !v) }, t('openPanel')),
-        open ? h(EcPanel, props) : null,
+        h('div', { style: { display: 'flex', gap: '10px', marginTop: '6px' } },
+          h('button', {
+            style: confirmApproveStyle,
+            onClick: () => submit('approve', pending.gate),
+            onMouseEnter: (e) => { e.currentTarget.style.opacity = '.85' },
+            onMouseLeave: (e) => { e.currentTarget.style.opacity = '1' },
+          }, isGoNoGo ? t('confirm.goNoGo') : t('confirm.approve')),
+          h('button', {
+            style: confirmRejectStyle,
+            onClick: () => submit('reject', pending.gate),
+            onMouseEnter: (e) => { e.currentTarget.style.opacity = '.7' },
+            onMouseLeave: (e) => { e.currentTarget.style.opacity = '1' },
+          }, t('confirm.reject')),
+        ),
       )
     }
 

@@ -1,12 +1,12 @@
 /**
  * command.js —— /ec 子命令（CONTRACT §6，防御性注册）。
  * 核心能力在 tools/能力层，命令是便利层：ctx.commands 不存在或注册失败都不阻断插件激活。
+ * 所有错误统一走 ecError（领域错误白名单 + 系统异常包装），不冒用 INVALID_INPUT。
  */
 import { ecGate } from './tools.js'
 import { metricsAction } from './metrics.js'
 import { memoryAction } from './memory.js'
-import { resolveAllowedRoot, ecError } from './gate-service.js'
-
+import { ecError, resolveAllowedRoot, DOMAIN_CODES } from './gate-service.js'
 
 /**
  * 解析并执行一行 /ec 子命令（纯逻辑，便于 Host 与 HTTP action 复用）。
@@ -18,7 +18,6 @@ import { resolveAllowedRoot, ecError } from './gate-service.js'
  */
 export function runEcCommand(line, projectRoot, opts = {}) {
   // projectRoot 是文本标签（本机或远端路径均可）：只做规范化，不做白名单/存在性校验。
-  // 传 undefined 时用 cwd；空标签返回领域错误，不读也不写。
   const root = resolveAllowedRoot(projectRoot ?? process.cwd())
   if (!root) {
     return { ok: false, error: ecError('INVALID_INPUT', 'projectRoot 是空标签（须非空字符串）', { projectRoot }) }
@@ -27,55 +26,84 @@ export function runEcCommand(line, projectRoot, opts = {}) {
   const sub = (parts[0] === '/ec' ? parts[1] : parts[0]) ?? 'status'
   const rest = parts.slice(parts[0] === '/ec' ? 2 : 1)
 
-  if (sub === 'status') {
-    const state = ecGate.read(root)
-    const role = ecGate.nextRole(root, opts)
-    return {
-      ok: true, command: 'status', stage: state.stage,
-      gates: Object.fromEntries(Object.entries(state.gates).map(([g, v]) => [g, v.passed])),
-      role: role.role, mode: role.mode ?? 'A', parallelRoles: role.roles ?? [],
-      blockedBy: role.blockedBy ?? null,
-      missingArtifacts: Object.entries(state.artifacts).filter(([, v]) => !v).map(([k]) => k),
+  try {
+    if (sub === 'status') {
+      const state = ecGate.read(root)
+      const role = ecGate.nextRole(root, opts)
+      return {
+        ok: true, command: 'status', stage: state.stage,
+        gates: Object.fromEntries(Object.entries(state.gates).map(([g, v]) => [g, v.passed])),
+        role: role.role, mode: role.mode ?? 'A', parallelRoles: role.roles ?? [],
+        blockedBy: role.blockedBy ?? null,
+        missingArtifacts: Object.entries(state.artifacts).filter(([, v]) => !v).map(([k]) => k),
+      }
     }
-  }
-  if (sub === 'next') {
-    const role = ecGate.nextRole(root, opts)
-    return {
-      ok: true, command: 'next', ...role,
-      mode: role.mode ?? 'A', parallelRoles: role.roles ?? [], ready: Boolean(role.role),
+    if (sub === 'next') {
+      const role = ecGate.nextRole(root, opts)
+      return {
+        ok: true, command: 'next', ...role,
+        mode: role.mode ?? 'A', parallelRoles: role.roles ?? [], ready: Boolean(role.role),
+      }
     }
-  }
-  if (sub === 'gate') {
-    const gate = (rest[0] ?? '').toUpperCase()
-    if (!['G1', 'G2', 'G3'].includes(gate)) {
-      return { ok: false, error: { code: 'INVALID_INPUT', message: '用法：/ec gate <G1|G2|G3> [evidence]' } }
-    }
-    if (gate === 'G3') {
-      const evidence = rest.slice(1).join(' ')
-      const sep = evidence.indexOf('::')
-      const r = ecGate.confirmG3(root, {
-        command: (sep >= 0 ? evidence.slice(0, sep) : evidence).trim(),
-        outputDigest: (sep >= 0 ? evidence.slice(sep + 2) : '').trim(),
-      })
+    if (sub === 'gate') {
+      const gate = (rest[0] ?? '').toUpperCase()
+      if (!['G1', 'G2', 'G3'].includes(gate)) {
+        return { ok: false, error: ecError('INVALID_INPUT', '用法：/ec gate <G1|G2|G3> [evidence]') }
+      }
+      if (gate === 'G3') {
+        const evidence = rest.slice(1).filter((a) => !a.startsWith('--')).join(' ')
+        const sep = evidence.indexOf('::')
+        const r = ecGate.confirmG3(root, {
+          command: (sep >= 0 ? evidence.slice(0, sep) : evidence).trim(),
+          outputDigest: (sep >= 0 ? evidence.slice(sep + 2) : '').trim(),
+        })
+        return r.ok ? { ok: true, command: 'gate', ...r.value } : r
+      }
+      // G1/G2 需人拍板：命令里只有用户显式 --confirm 才放行（agent 不得代批）。
+      if (!rest.includes('--confirm')) {
+        return { ok: false, error: ecError('NOT_USER_CONFIRMED', `门 ${gate} 须人拍板：请点确认卡或用 /ec gate ${gate} --confirm`, { gate }) }
+      }
+      const r = ecGate.confirmGate(root, gate)
       return r.ok ? { ok: true, command: 'gate', ...r.value } : r
     }
-    // G1/G2 需人拍板：命令里只有用户显式 --confirm 才放行（agent 不得代批）。
-    if (!rest.includes('--confirm')) {
-      return { ok: false, error: { code: 'NOT_USER_CONFIRMED', message: `门 ${gate} 须人拍板：请点确认卡或用 /ec gate ${gate} --confirm`, details: { gate } } }
+    if (sub === 'metrics') {
+      return { ...metricsAction({ action: 'list', limit: Number(rest[0]) || 20, projectRoot: root }), command: 'metrics' }
     }
-    const r = ecGate.confirmGate(root, gate)
-    return r.ok ? { ok: true, command: 'gate', ...r.value } : r
+    if (sub === 'memory') {
+      const action = rest[0] ?? 'query'
+      // 形如：/ec memory write conventions <内容...>；recall 用线索；目录内文件走具名 --file=
+      const named = rest.filter((a) => a.startsWith('--'))
+      const positional = rest.slice(1).filter((a) => !a.startsWith('--'))
+      // 未知 flag 直接拒绝，不静默丢弃（评审 F15）。
+      const knownFlags = named.filter((a) => a.startsWith('--file='))
+      const unknown = named.filter((a) => !a.startsWith('--file='))
+      if (unknown.length) {
+        return { ok: false, error: ecError('INVALID_INPUT', `未知 /ec memory 参数：${unknown.join(' ')}`, { unknown }) }
+      }
+      const layer = positional[0]
+      const query = positional.slice(1).join(' ') || undefined
+      const fileArg = knownFlags[0]?.slice(7)
+      if (fileArg === '') {
+        return { ok: false, error: ecError('INVALID_INPUT', '--file= 不能为空') }
+      }
+      return {
+        ...memoryAction({
+          action, layer, query, projectRoot: root,
+          // write 的正文取线索位（/ec memory write conventions <正文>）；其余 action 用 query。
+          content: action === 'write' ? query : undefined,
+          file: fileArg || undefined,
+        }),
+        command: 'memory',
+      }
+    }
+    return { ok: false, error: ecError('INVALID_INPUT', `未知 /ec 子命令 ${sub}`, { sub }) }
+  } catch (e) {
+    // 系统异常（坏 state.json 等）统一包装，不冒充 INVALID_INPUT（评审 F10）。
+    if (e && typeof e === 'object' && DOMAIN_CODES.has(e.code) && Object.hasOwn(e, 'details')) {
+      return { ok: false, error: e }
+    }
+    return { ok: false, error: ecError('STORAGE_UNAVAILABLE', `/ec ${sub} 执行失败：${e?.message ?? e}`, {}) }
   }
-  if (sub === 'metrics') {
-    return { ...metricsAction({ action: 'list', limit: Number(rest[0]) || 20, projectRoot: root }), command: 'metrics' }
-  }
-  if (sub === 'memory') {
-    const action = rest[0] ?? 'query'
-    const layer = rest[1]
-    const query = rest.slice(2).join(' ') || undefined
-    return { ...memoryAction({ action, layer, query, projectRoot: root }), command: 'memory' }
-  }
-  return { ok: false, error: { code: 'INVALID_INPUT', message: `未知 /ec 子命令 ${sub}`, details: { sub } } }
 }
 
 /**
@@ -93,13 +121,10 @@ export function registerEcCommand(ctx) {
   try {
     const dispose = commands.register({
       name: '/ec',
-      description: '工程套件统一入口：status / next / gate / metrics / memory',
+      description: '工程套件统一入口：status / next / gate / metrics / memory（memory 支持 init/write/query/recall）',
       async execute(agent, line) {
-        try {
-          return runEcCommand(line)
-        } catch (e) {
-          return { ok: false, error: { code: 'INVALID_INPUT', message: String(e?.message ?? e) } }
-        }
+        // runEcCommand 自身不抛（内部 try/catch）；这里仅兜底未预期的注册层异常。
+        return runEcCommand(line)
       },
     })
     return typeof dispose === 'function' ? dispose : () => {}

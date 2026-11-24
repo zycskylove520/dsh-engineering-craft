@@ -1,5 +1,7 @@
 # CONTRACT · engineering-craft DSH 工程流程套件（接口契约 · G2 架构交接物）
 
+> ⚠️ **废弃早期设计提示（2026-11-24 标注）**：本文 **§1 的「4 row」模块边界**、**§2/§3 的 SessionProjection / wire.view / ctx.remote 相关 API 写法**、§3 数据流中的投影状态图，均为**已废弃的早期设计**，仅作历史原文保留，不代表当前实现。当前落地形态见 §0 与文内 `[实测纠正]` 条：单 host row + `dsh.client` 声明、state.json 落盘 + Host↔Client `ctx.webServer`/`fetch()`。阅读与实现以 `[实测纠正]` 标记及变更记录为准，勿按 §1/§2/§3 的早期写法施工。
+>
 > 架构岗（ec-architect）交接物。**只定接口，不含实现代码**（G2 门：人确认后才由研发岗开工）。
 > 基线：ADR `../engineering-craft-dsh-suite-adr.md`（G2 已放行，2026-11-23 修订）、`PRD.md`、`PLAN.md`、`.project_memory/`。
 > 契约事实等级标注：`[实测]` = 本轮 `cordis_inspect_query` / asar 文档核对；`[实测纠正]` = lead 从已装插件源码实测、推翻本文件早期假设并据以修订（证据见文内引用路径）；`[交接]` = 任务简报给出的已核实实时契约；`[设计]` = 本文件定义、待实施验证。凡 `[待实测]` 一律进 `open-questions.md`，不得臆造。
@@ -84,7 +86,7 @@ export function checkGate(gateId, state, rule) { /* 实现留白 */ }
  * @param {PipelineOrder} order 岗位顺序表（默认常量 DEFAULT_PIPELINE）
  * @param {{capabilities?:{subagent?:boolean}, thresholds?:{minFilesForParallel?:number}}} [opts]
  * @returns {{role: EcRole} | {role: null, blockedBy: string} | {role:'developer', roles: string[], mode:'B', units: Array<{id:string,ownerFiles:string[]}>}}
- *   形态 A 兼容旧形状；形态 B 额外带 roles/units/mode。blockedBy 为缺失交接物键
+ *   形态 A 为默认单岗位形状；形态 B 额外带 roles/units/mode。blockedBy 为缺失交接物键
  */
 export function nextRole(state, order = DEFAULT_PIPELINE, opts = {}) { /* 实现留白 */ }
 
@@ -108,6 +110,7 @@ export const DEFAULT_PIPELINE;
  * 工具/命令经本类查询与推进门，不另存副本。
  * DSH 契约：sessionProjections.register(definition) -> Promise<ProjectionHandle<S>>，
  * handle.stateOf() 读状态；definition 含 key/apply/view/wire/stateVersion。[交接][实测 §目录签名]
+ * 【2026-11-24 注】本段为已废弃的早期投影设计（见文首废弃提示）；当前 stateVersion=2，投影已由 state.json+webServer 取代。
  */
 export default class EcGate {
   /**
@@ -250,6 +253,7 @@ ctx.sessionProjections.apply(state, existingEvent)  ← 只 fold 既有 session 
         │                                            不 append 新 event type（ADR-004）[交接]
         ▼
 EcState（投影缓存，stateVersion=1）──handle.stateOf()──► EcGate ──► 4 tools / /ec / promptSection
+【2026-11-24 注】此数据流是已废弃的早期投影设计（见文首废弃提示）；当前为 state.json（version 2）+ webServer/fetch。
         │
         └──wire.view(state)──► Client slot props.view ──► EcPanel 渲染（只读）
                                       │
@@ -279,6 +283,7 @@ EcState（投影缓存，stateVersion=1）──handle.stateOf()──► EcGate
  *   'INVALID_INPUT'         // 入参不合 schema / 路径非法
  *   'PATH_OUT_OF_ROOT'      // 路径越出 projectRoot 标签（防 .. 穿越；不再是宿主白名单校验）
  *   'ARTIFACT_SCHEMA_FAIL'  // 交接物结构校验失败（details.artifact / missingFields）
+ *   'ARTIFACT_OUTSIDE_TMP'  // ec_artifact 的 path 不在 .project_memory/tmp/ 内（强制 tmp；details.path）
  *   'CONFIG_INVALID'        // Config 违约（不可恢复，throw）
  *   'STORAGE_UNAVAILABLE'   // storage service/profile 不可用
  */
@@ -295,19 +300,19 @@ EcState（投影缓存，stateVersion=1）──handle.stateOf()──► EcGate
 - **loader entry id 必须等于 namespace 名**（row id 即包名 ` '@local/dsh-engineering-craft'`，见 §1）+ 本模块导出 `Config`，三者齐备设置页才可写。
 - schema 校验范围要宽松：范围约束（如阈值上下限）放在**写/读时钳制**，不要写成 `.min()/.max()` 等硬校验——校验不过会让 cordis 拒收 entry ⇒ 整条插件不激活（bili `commentPerRound` 的教训）。
 
-默认值来自 ADR §4.2；`minFilesForParallel` 是**形态 B 的收益门**（语义为最小并行单元数，见 ADR-PARALLEL §取舍与风险；默认 2），`minUnitsForWorkflow` 为预留配置项（当前未使用）。本套件恒走多 agent，无 single/workflow 路由。
+默认值来自 ADR §4.2；`minFilesForParallel` 是**形态 B 的收益门**（语义为**最小并行单元数**，见 ADR-PARALLEL §取舍与风险；默认 2）。**Config 只保留 `gates` 与 `thresholds.minFilesForParallel` 两项**；两个死配置 `paths.memoryDirName/artifactsRoot` 与 `minUnitsForWorkflow` 已删除（墓碑式说明，不出现在 schema 中）。本套件默认多 agent，无 single/workflow 路由；只有一个不可分单元时单岗位顺序执行亦合规（非失败）。
 
 ```js
 /**
  * 插件 Config（用户可在设置页改；schemastery 缺失时为 undefined，插件照常加载）。[实测纠正]
  * 门规则驱动 rules.checkGate；判定纯函数，工具/面板/命令共用同一份。
- * 字段：gates 门规则表 / thresholds 三道门收益阈值 / paths 路径策略（相对 projectRoot）。
+ * 字段：gates 阶段门规则表 / thresholds.minFilesForParallel 并行三判据的收益阈值（最小并行单元数，默认 2）。
+ * 已删除：paths.memoryDirName/artifactsRoot、minUnitsForWorkflow（死配置）。
  * 每个字段 .extra('volatile', true) 才能被设置页写。
  */
 export const Config = !z ? undefined : z.object({
   // gates: G1/G2/G3 各 {requiredArtifacts, requireUserConfirm, requireEvidence}（默认值见下）
-  // thresholds: {minFilesForParallel, minUnitsForWorkflow}
-  // paths: {memoryDirName, artifactsRoot}
+  // thresholds: {minFilesForParallel}
   // ↑ 各字段均在实现时补 .extra('volatile', true)；具体 z 类型（z.object/z.natural/z.string…）由实现定
 })
 // 默认：
@@ -316,8 +321,7 @@ export const Config = !z ? undefined : z.object({
 //   G2: { requiredArtifacts:['adr','contract'],  requireUserConfirm:true,  requireEvidence:false },
 //   G3: { requiredArtifacts:[],                  requireUserConfirm:false, requireEvidence:true  },
 // }
-// thresholds = { minFilesForParallel: 2, minUnitsForWorkflow: 6 }
-// paths = { memoryDirName:'.project_memory', artifactsRoot:'.' }
+// thresholds = { minFilesForParallel: 2 }
 ```
 
 `GateRule` = `{requiredArtifacts: ArtifactKey[], requireUserConfirm: boolean, requireEvidence: boolean}`。
@@ -362,37 +366,44 @@ Config 保存走 `ctx.fiber.entry` + `ctx.get('configEditor').edit(entry, curren
   "type": "object",
   "properties": {
     "action": {"type":"string","enum":["create","validate"],"description":"create=写模板；validate=只读校验"},
-    "kind": {"type":"string","enum":["prd","adr","contract","plan","brief","release","testReport","findings"]},
-    "path": {"type":"string","description":"目标路径；须落在 projectRoot 标签内（防 .. 穿越，越界返回 PATH_OUT_OF_ROOT）"}
+    "kind": {"type":"string","enum":["prd","adr","contract","plan","brief","release","testReport","findings","progress"]},
+    "path": {"type":"string","description":"目标路径（省略则默认落 .project_memory/tmp/<文件名>）；必须落在 .project_memory/tmp/ 内，越界（含落项目根等其他位置）返回 ARTIFACT_OUTSIDE_TMP（不再是可选择覆盖）"}
   },
-  "required": ["action","kind","path"], "additionalProperties": false
+  "required": ["action","kind"], "additionalProperties": false
 }
 ```
-- **execute 返回**：`{ok:true, kind, path, status:'created'|'exists'|'valid'|'invalid', missingFields:string[]}` 普通对象；失败 `{ok:false, error:{code:'ARTIFACT_SCHEMA_FAIL'|'PATH_OUT_OF_ROOT', details}}`。**路径指针**是唯一返回值，不回传正文。
+- **execute 返回**：`{ok:true, kind, path, status:'created'|'exists'|'valid'|'invalid', missingFields:string[]}` 普通对象；失败 `{ok:false, error:{code:'ARTIFACT_SCHEMA_FAIL'|'ARTIFACT_OUTSIDE_TMP', details}}`。**路径指针**是唯一返回值，不回传正文。`path` **只能落在 `.project_memory/tmp/` 内**（省略默认 `.project_memory/tmp/<文件名>`），传项目根等其他位置返回 `ARTIFACT_OUTSIDE_TMP`（不再是"可选覆盖"）。`progress` 类型生成 `PROGRESS.md`，必含五节 `Goal` / `Done` / `Next` / `Open questions` / `Key facts`。PLAN.md 模板含「检索套用约束」节与 `constraints` 字段（写码前 recall 命中的记忆条目 id 列此）。
 
 ### 5.3 `ec_memory`
 
-- **description**：`初始化或按 INDEX 线索读写 .project_memory/ 规范层；只存规范，不写会话流水。`
+- **description**：`初始化或按 INDEX 线索读写 .project_memory/ 工程记忆（6 职责目录+3 根文件+tmp）；recall=写码前检索套用，命中条目 id 列入 PLAN constraints。`
+- **骨架与所有权**：`init` 建 **6 个标准职责目录**（architecture / conventions / api-contracts / data-model / testing / build，build 独立于 architecture）+ **3 个根文件**（INDEX.md / status.md / open-questions.md）+ **tmp/** 执行产物区，全部建好、内容可薄但不缺位。目录所有权用 `.project_memory/` 内的空文件 `.engineering-craft` 标记：**无标记的已存在目录拒绝写入并降级到 `.project_memory_engineer/`**；旧 `.engineering-craft-marker` 已删除。说明：`.engineering-craft` 按 skill 定义是**记忆目录内的空文件 marker**，只作所有权标记，不再兼作状态目录名；插件状态目录已改名为 `<projectRoot>/.ec-state/`（state.json；无兼容：旧路径数据不读取、不迁移，版本不是 2 报 `STORAGE_UNAVAILABLE`），名字冲突已消除。GATE-LOG 落 `<projectRoot>/.project_memory/tmp/GATE-LOG.md`（对齐 skill `core/gate-metrics.md` 六字段，每行一条 JSON；无兼容：旧 `.engineering-craft/gate-log.jsonl` 不再读取合并）。
+- **五件套校验（写规范一律强制）**：每条陈述须为 `[KIND ID]`（RULE/FACT/DECISION/OPEN 四选一 + 稳定 id）+ 陈述正文 + `证据:` 行（文件路径 + 模式描述）+ `记录: YYYY-MM-DD · 实测|推断|用户约定`；**证据与记录必须在独立行**（行首正则校验，仅"包含"不算）。硬约束：禁本机绝对路径；事实等级与核实状态（待复核/已复核）正交分列；证据行号仅辅助。写入无 `strict` 参数，一律强制五件套，不退回旧的「来源+日期」校验。
+  - **`normalizeMemoryContent`（写入口自动分条，2026-11-24 实测修复）**：LLM 调 `ec_memory write` 时常把五件套挤成单行（`[KIND ID] 正文。证据: X。记录: Y` 全在一行——TinyTrain 建库 150 条全如此）。写入口在校验前统一把这种单行拆成三行（header / `  证据:` / `  记录:`），再校验；幂等（已是多行的不动），非陈述行（标题/引用/`状态:` 等）原样保留；结果带 `normalized:true` 标记。返回值与落盘内容都是分条后的版本。
+- **recall（检索套用闭环）**：写业务/核心代码前按线索检索全规范层，返回命中条目的 id/kind/file，供 agent 把 id 列入 `.project_memory/tmp/PLAN.md` 的 constraints；**每个并行单元各自检索，无命中标「无既有约定」**。
 - **parameters**（标准 JSON Schema object）：
 ```json
 {
   "type": "object",
   "properties": {
-    "action": {"type":"string","enum":["init","write","query"],"description":"init=建骨架；write=写规范带来源+日期；query=按需读"},
+    "action": {"type":"string","enum":["init","write","query","recall"],"description":"init=建骨架（6目录+3根文件+标记+tmp）；write=写规范（默认五件套校验）；query=按需读；recall=检索套用（返回 id/kind 供 PLAN.constraints）"},
     "projectRoot": {"type":"string","description":"项目根路径标签（本机或远端均可，如 /remote/path/to/Project）；不做存在性校验，缺省用当前工作目录"},
-    "layer": {"type":"string","enum":["architecture","conventions","project","open-questions","index"],
-              "description":"write/query 的目标层（index 指 INDEX.md）"},
-    "content": {"type":"string","description":"write 时正文；须含来源与日期指针"},
-    "query": {"type":"string","description":"query 时的检索线索（不倾倒全目录）"}
+    "layer": {"type":"string",
+              "enum":["index","status","open-questions","architecture","conventions","api-contracts","data-model","testing","build","tmp"],
+              "description":"write/query 的目标层：根文件别名或职责目录（无 project 层）"},
+    "file": {"type":"string","description":"职责目录内的文件名（如 architecture/engine.md 的 engine，省略默认 overview）"},
+    "content": {"type":"string","description":"write 时正文；默认须合五件套（[KIND ID] + 陈述 + 证据: + 记录: 日期·等级）"},
+    "query": {"type":"string","description":"query/recall 的检索线索（recall 会全规范层扫描，返回命中 id/kind）"}
   },
   "required": ["action"], "additionalProperties": false
 }
 ```
-- **execute 返回**：`{ok:true, action, path, excerpt?, status}` 普通对象；`init` 冲突目录名冲突时用 `.project_memory_engineer/` 并打标记（ADR §8）；违反"只写规范层"返回 `{ok:false, error:{code:'INVALID_INPUT', details}}`。
+- **execute 返回**：`{ok:true, action, path, excerpt?, status}` 普通对象；`recall` 额外返回 `{hits:[{id,kind,file}], filesScanned}`（bounded，最多 30 条）；`init` 冲突目录名冲突时用 `.project_memory_engineer/` 并打标记；违反"只写规范层"或五件套校验失败返回 `{ok:false, error:{code:'INVALID_INPUT', details}}`。
 
 ### 5.4 `ec_gate_metrics`
 
 - **description**：`记录或回看 GATE-LOG 门度量（每次门拦截/放行的原因与指针），用于反复拦截时回写规范。`
+- **落点与 schema**：GATE-LOG 落 `<projectRoot>/.project_memory/tmp/GATE-LOG.md`，**每行一条 JSON**，对齐 skill `core/gate-metrics.md` **六字段**：日期(date) / 阶段(stage) / 门(gate) / 结果(outcome：`拦住`|`通过`|`绕过`) / 缺什么(missing) / 处置(disposition)。无兼容：旧 `.engineering-craft/gate-log.jsonl` 不再读取合并。
 - **parameters**（标准 JSON Schema object）：
 ```json
 {
@@ -400,14 +411,16 @@ Config 保存走 `ctx.fiber.entry` + `ctx.get('configEditor').edit(entry, curren
   "properties": {
     "action": {"type":"string","enum":["record","list"],"default":"list"},
     "gate": {"type":"string","enum":["G1","G2","G3"],"description":"record 时必填"},
-    "outcome": {"type":"string","enum":["blocked","passed"],"description":"record 时必填"},
-    "reason": {"type":"string","description":"record 时：拦截/放行原因摘要（bounded）"},
+    "outcome": {"type":"string","enum":["拦住","通过","绕过"],"description":"record 时必填；只接受中文三值（等价于六字段的『结果』），英文 blocked/passed 不识别"},
+    "stage": {"type":"string","description":"record 时：阶段（六字段之『阶段』）"},
+    "missing": {"type":"string","description":"record 时：缺什么（六字段之『缺什么』）"},
+    "disposition": {"type":"string","description":"record 时：处置（六字段之『处置』）"},
     "limit": {"type":"integer","minimum":1,"maximum":100,"default":20,"description":"list 时最多返回条数"}
   },
   "required": ["action"], "additionalProperties": false
 }
 ```
-- **execute 返回**：`{ok:true, records: GateMetric[], truncated:boolean}` 普通对象；每条 `{gate, outcome, reason, at, evidencePath}`；bounded，不倾倒全量日志（tool-design.md）。存储载体 `[待实测]` → OQ-3。
+- **execute 返回**：`{ok:true, records: GateMetric[], truncated:boolean}` 普通对象；每条对齐且仅含六字段 `{date, stage, gate, outcome, missing, disposition}`（无 `reason`/`at`/`evidencePath`/`result` 兼容字段）；`outcome` 只取中文 `拦住`/`通过`/`绕过`；bounded，不倾倒全量日志（tool-design.md）。存储载体 `.project_memory/tmp/GATE-LOG.md`（无兼容：旧 `.engineering-craft/gate-log.jsonl` 不读取合并不写盘）。
 
 ---
 
@@ -422,7 +435,7 @@ Config 保存走 `ctx.fiber.entry` + `ctx.get('configEditor').edit(entry, curren
 | `/ec next` | 返回下一应启动岗位（形态 A 单岗位 / 形态 B 研发岗多单元） | `{role, ready, blockedBy, mode?, parallelRoles}` |
 | `/ec gate <G1\|G2\|G3> [evidence]` | 触发门确认（G1/G2 需人确认上下文，G3 需 evidence） | 成功/失败 + code |
 | `/ec metrics [limit]` | 回看 GATE-LOG | bounded 记录列表 |
-| `/ec memory <init\|write\|query> …` | 转发 memory 能力（与工具同语义） | 路径指针 / excerpt |
+| `/ec memory <init\|write\|query\|recall> …` | 转发 memory 能力（与工具同语义；`recall <线索>` 检索套用，`--file=` 对应 file；无 `--loose`/strict 开关，写入一律强制五件套） | 路径指针 / excerpt / recall hits |
 
 - **go-no-go**：不在 `/ec` 里由 agent 拍板；走 `shell.overlay` 确认卡 → `ctx.remote` → 用户动作专属命令（ADR §6.1、user-actions.md）。
 - **命令定义真实字段**（`CommandDefinition` 的 name/description/handler 形状）`[待实测]` → OQ-6。
@@ -449,14 +462,15 @@ Config 保存走 `ctx.fiber.entry` + `ctx.get('configEditor').edit(entry, curren
 
 ## 8. 六岗位交接物文件名与字段（交接只传路径指针）
 
-> 文件名遵循 `.project_memory/conventions/naming.md`：全大写。字段是"必须存在的最小结构"，由 `ec_artifact validate` 校验；正文由各岗位写，本契约只定 schema。路径指针 = `<projectRoot>/<path>`，`projectRoot` 由 workingDirectory 解析。
+> 文件名遵循 `.project_memory/conventions/naming.md`：全大写。字段是"必须存在的最小结构"，由 `ec_artifact validate` 校验；正文由各岗位写，本契约只定 schema。路径指针 = `<projectRoot>/<path>`，`projectRoot` 由 workingDirectory 解析。`ec_artifact` 的 `path` 参数省略时默认落 `.project_memory/tmp/<文件名>`；**传 path 时必须落在 `.project_memory/tmp/` 内**，落项目根等其他位置返回 `ARTIFACT_OUTSIDE_TMP`（见 §4.1/§5.2）；`progress` 类型为长任务接力交接物（PROGRESS.md，五节 Goal/Done/Next/Open questions/Key facts）。
 
 | 岗位（subagent 名） | 交接物文件 | 必含字段（顶层键） | 准出 |
 |---|---|---|---|
 | `ec-product` | `PRD.md` | `目标` / `用户与场景` / `用户故事` / `优先级` / `验收标准(可判定)` / `开放问题` | 人确认 G1 |
 | `ec-architect` | `ADR.md` | `状态` / `目标与非目标` / `总体架构` / `模块清单` / `数据模型` / `风险与取舍` / `待拍板` | 人确认 G2 |
 | `ec-architect` | `CONTRACT.md`（本文件） | `模块边界` / `公开 API 签名` / `数据流` / `错误语义` / `Config schema` / `EcState JSON` / `工具约定` / `子命令` / `slot 清单` / `交接物字段` | 人确认 G2 |
-| `ec-developer` | `PLAN.md` | 每单元 `{id, target, ownerFiles, acceptance, status}`；文件所有权不重叠 | 窄检通过 G3 |
+| `ec-developer` | `PLAN.md` | 每单元 `{id, target, ownerFiles, acceptance, status, constraints}`；文件所有权不重叠；模板含「检索套用约束」节（`constraints` = 写码前 recall 命中的记忆条目 id，无命中标「无既有约定」） | 窄检通过 G3 |
+| `ec-developer` | `PROGRESS.md`（`progress`） | 五节 `Goal` / `Done` / `Next` / `Open questions` / `Key facts`；长任务接力用，默认落 `.project_memory/tmp/PROGRESS.md` | 长任务接力/交接 |
 | `ec-tester` | `TEST-REPORT.md` | `测试代码指针` / `覆盖率` / `边界异常` / `真实输出` / `证据分级(实测/推断/猜测)` | 全绿 |
 | `ec-reviewer` | `BRIEF.md` + `FINDINGS.md` | Brief：变更摘要 / 风险 / 验证结论；Findings：`{id, severity, file:line, issue, fix}`；`VERDICT: APPROVE`（4 轮封顶） | VERDICT APPROVE |
 | `ec-ops` | `RELEASE.md` | `发布清单` / `回滚预案` / `观察项` / `go/no-go(人)` | 人 go/no-go |
@@ -471,13 +485,15 @@ ec-product → ec-architect → ec-developer → ec-tester → ec-reviewer → e
 
 ---
 
-## 9. `EcState` JSON 结构（投影状态，`stateVersion:1`）
+## 9. `EcState` JSON 结构（state.json 文件状态，`stateVersion:2`）
+> `[已废弃]` 旧称"投影状态"属 §1/§2 早期设计；当前为 `.ec-state/state.json` 文件落盘 + webServer/fetch。
 
-> 基于 ADR §4.1，字段冻结；新增字段须升 `stateVersion` 并给迁移说明（practices.md §Performance）。纯 JSON、可 checkpoint。
+> 基于 ADR §4.1，字段冻结；新增字段须升 `stateVersion`（practices.md §Performance）。纯 JSON、可 checkpoint。
+> **v2 变更（2026-11-24）**：新增 `progress` 交接物键（artifacts 共 9 键）、`releaseDecision`（初值 null）、PLAN 单元支持 `constraints` 字段。**无兼容：不识别 v1、不做迁移；只有 version=2 可用，版本不是 2 直接报 `STORAGE_UNAVAILABLE`**。
 
 ```jsonc
 {
-  "version": 1,
+  "version": 2,
   "projectRoot": "E:/path/to/project | null",  // workingDirectory.service 解析；[待实测] OQ-5
   "stage": "requirements",                     // requirements|design|coding|testing|review|delivery|release
   "gates": {
@@ -485,14 +501,17 @@ ec-product → ec-architect → ec-developer → ec-tester → ec-reviewer → e
     "G2": { "passed": false, "confirmedBy": "user",  "at": null, "evidence": null },
     "G3": { "passed": false, "confirmedBy": "agent", "at": null, "evidence": null }
   },
-  "artifacts": {                               // 交接物路径指针，null=未落盘
+  "artifacts": {                               // 交接物路径指针，null=未落盘（9 键）
     "prd": null, "adr": null, "contract": null,
     "plan": null, "brief": null, "release": null,
-    "testReport": null, "findings": null       // 扩展：TEST-REPORT.md / FINDINGS.md
+    "testReport": null, "findings": null,      // 扩展：TEST-REPORT.md / FINDINGS.md
+    "progress": null                           // v2 新增：PROGRESS.md 长任务接力交接物
   },
+  "releaseDecision": null,                     // v2 新增：go/no-go 决策，初值 null
   "plan": [
     { "id": "P1", "target": "状态核心", "ownerFiles": ["rules.js"],
-      "acceptance": "单测全绿", "status": "todo" }   // todo|doing|done
+      "acceptance": "单测全绿", "status": "todo",  // todo|doing|done
+      "constraints": ["R-SVC-01"] }               // v2 新增：recall 命中的记忆条目 id
   ],
   "pipeline": {
     "role": null,                              // product|architect|developer|tester|reviewer|ops|null
@@ -502,20 +521,20 @@ ec-product → ec-architect → ec-developer → ec-tester → ec-reviewer → e
       "tester": null, "reviewer": null, "ops": null
     }
   },
-  "metrics": { "lastGate": null, "blockCount": 0 }, // 轻量摘要；全量在 GATE-LOG（OQ-3）
+  "metrics": { "lastGate": null, "blockCount": 0 }, // 轻量摘要；全量在 .project_memory/tmp/GATE-LOG.md（无兼容：旧 .engineering-craft/gate-log.jsonl 不读取合并）
   "updatedAt": 0                               // epoch ms
 }
 ```
 
 - `confirmedBy` 约束：G1/G2/go-no-go 恒 `user`；G3 恒 `agent`。任何反过来写都判 `CONFIG_INVALID`/`NOT_USER_CONFIRMED`。
-- `view(state)` 返回的 Client 视图是本结构的只读子集（去掉内部 `metrics.blockCount` 明细等），值不变返回同引用。
+- `[已废弃]` `view(state)` / 同引用抑制属 §1/§2 早期投影设计；当前 Client 经 `GET /api/engineering-craft/state` 拿 state.json 的只读子集。
 
 ---
 
 ## 10. 交接摘要（给下游研发岗）
 
 - **先读本文 + PRD/ADR/PLAN + `.project_memory/`** 再动手；G2 已过但实施仍受阶段门约束（P0 骨架 → P1 状态核心 …）。
-- **先解决 `open-questions.md` 中仍标 `[待实测]` 的项**（sessionProjections.wire.view、storage domain、slot props、ctx.remote 路径、workingDirectory 解析）再写对应模块；不得猜 API。OQ-2/OQ-4/OQ-9 已由实测澄清（见 §2.3/§4.2/§1 与 open-questions「已实测澄清」区）：工具用 `defineTool({name,description,parameters,output,execute})` 且容错加载、Config 用 schemastery `z.object` + `.extra('volatile',true)`、打包为单 host row + `dsh.client` 声明。
+- `[已废弃]` 早期"先解决 sessionProjections.wire.view / ctx.remote 等 `[待实测]` 项再施工"已不适用——这些问题已由 state.json + `ctx.webServer`/`fetch()` 方案取代（ADR §10.5）；仅 storage domain / slot props / workingDirectory 仍按 open-questions 现状处理，不得猜 API。OQ-2/OQ-4/OQ-9 已由实测澄清（见 §2.3/§4.2/§1 与 open-questions「已实测澄清」区）：工具用 `defineTool({name,description,parameters,output,execute})` 且容错加载、Config 用 schemastery `z.object` + `.extra('volatile',true)`、打包为单 host row + `dsh.client` 声明。
 - **每个公开导出保留本文 TSDoc**；`rules.js` 保持纯函数、先红后绿单测（`node:test`）。
 - **本契约不改 ADR/PRD/PLAN**（上游交接物）；有冲突回架构岗。
 
@@ -536,3 +555,16 @@ ec-product → ec-architect → ec-developer → ec-tester → ec-reviewer → e
   - **隐私漏网**：上一轮脱敏只扫正斜杠形态，遗漏反斜杠形态的内部路径示例（`ec-path.js`、`CONTRACT §11` 两处）——已全库清除，隐私复扫零命中。
   - **一致性**：ec_memory/ec_gate_metrics 的能力层空标签码 `PATH_OUT_OF_ROOT` → `INVALID_INPUT`，ec_artifact 补空标签检查；HTTP `/state` 缺参不再静默回落 host cwd（改为 400）；CONTRACT §5.1/§5.3 schema、错误码枚举、§2.2 update 注释同步；4 源码顶部"白名单"过时注释清理；UNC `//` 标签不再被 posix 折叠。
   - **验证**：新增 8 条安全回归测试（反斜杠穿越 / 根路径 / 跨 scheme / 空标签 / UNC / 标签形态保留），全套 **88/88 绿**；端到端 6 入口 ok=true、反斜杠穿越经真实工具层返回 `PATH_OUT_OF_ROOT`、空标签返回 `INVALID_INPUT`。
+
+- **2026-11-24 · 对齐 engineering-craft skill「工程记忆系统定稿」**（不重写上文历史，仅追加）：
+   - `memory.js` 骨架 = 6 职责目录 + 3 根文件 + tmp；所有权标记改为 `.project_memory/` 内空文件 `.engineering-craft`，无标记目录拒写降级 `.project_memory_engineer/`；旧 `.engineering-craft-marker` 删除（与项目根同名 `.engineering-craft/` 状态目录互不冲突，GATE-LOG 仍原位）。
+   - `ec_memory` 新增 `recall` + `file` 参数，layer 枚举扩展；写入一律强制五件套校验，无 `strict`（详见 §5.3）。
+   - `ec_artifact` 的 `path` 改可选（默认 `.project_memory/tmp/`），新增 `progress`（PROGRESS.md 五节），PLAN 模板加「检索套用约束」与 `constraints`。
+   - `EcState` 升 **version 2**：新增 `progress` 键（artifacts 共 9 键）、`releaseDecision`（null）、PLAN 单元 `constraints`；无兼容：不识别 v1、不迁移，版本不是 2 报 `STORAGE_UNAVAILABLE`（§9）。
+   - Config 删除死配置 `paths.memoryDirName/artifactsRoot`、`minUnitsForWorkflow`，只留 `gates` 与 `thresholds.minFilesForParallel`（§4.2）。
+   - 措辞统一为「默认多 agent；只有一个不可分单元时单岗位顺序执行亦合规（非失败）」，**无单 agent 降级**（DSH 特化，用户明确要求）。
+
+- **2026-11-24（收尾）· 状态目录改名 / GATE-LOG 移位 / 产物强制 tmp**（lead 已在源码落地、最近一次 116/116 测试通过；不重写上文历史，本节为当前事实，凡上文出现的相关旧描述均以此为准。兼容已彻底移除）：
+   - **状态目录改名**：`.engineering-craft/` → **`.ec-state/`**，state.json 新路径 `<projectRoot>/.ec-state/state.json`。原因：`.engineering-craft` 按 skill 定义是**记忆目录内的空文件 marker**，不能同时当状态目录名。**无兼容**：旧 `.engineering-craft/state.json` 不读取、不迁移，没有 `legacyStatePathOf`；版本不是 2 直接报 `STORAGE_UNAVAILABLE`。上文「状态仍落 `.engineering-craft/`」「与项目根同名 `.engineering-craft/` 状态目录互不冲突」等说法已作废——状态目录已改名，名字冲突已消除。
+   - **GATE-LOG 移位**：`.engineering-craft/gate-log.jsonl` → **`.project_memory/tmp/GATE-LOG.md`**，对齐 skill `core/gate-metrics.md` 六字段（日期/阶段/门/结果 拦住\|通过\|绕过/缺什么/处置），每行一条 JSON；**无兼容**：旧 gate-log.jsonl 不再读取合并（不 list 并入、不触发写盘）。`ec_gate_metrics` record 新增 `stage`/`missing`/`disposition` 参数，outcome 只接受中文 拦住\|通过\|绕过，英文 blocked/passed 不识别（见 §5.4）。上文「GATE-LOG 仍落 `.engineering-craft/gate-log.jsonl`」「GATE-LOG 仍原位」等说法已作废。
+   - **交接物强制 tmp**：`ec_artifact` 的 `path` **只能落在 `.project_memory/tmp/` 内**，传项目根等其他位置返回新错误码 `ARTIFACT_OUTSIDE_TMP`（不再是"可选覆盖"）；不传 path 默认 tmp/（见 §4.1/§5.2）。

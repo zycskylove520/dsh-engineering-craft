@@ -80,7 +80,7 @@
 
 > cordis_inspect_query 带参在本环境反复被拒（非我能修复），不再依赖未实测 API。全部改用本机已装插件验证过的模式，证据见 open-questions「已实测澄清」区与 ADR §10.5。
 
-- **OQ-1/3 收敛**：门状态不用 SessionProjection/Storage service，改为 `projectRoot/.engineering-craft/state.json`（EcState JSON 落盘）。工具接受 `projectRoot`（默认 cwd，经路径白名单校验），跨会话连续。理由：工程状态本就按项目而非会话；fs API 稳定无需实测。
+- **OQ-1/3 收敛**：门状态不用 SessionProjection/Storage service，改为 `projectRoot/.ec-state/state.json`（EcState JSON 落盘；2026-11-24 由 `.engineering-craft/state.json` 改名，无兼容：旧路径不读不迁移——`.engineering-craft` 按 skill 定义是记忆目录内的空文件 marker，不再兼作状态目录名）。工具接受 `projectRoot`（默认 cwd，经路径白名单校验），跨会话连续。理由：工程状态本就按项目而非会话；fs API 稳定无需实测。
 - **OQ-7/8 收敛**：Client 不依赖 `wire.view` / `ctx.remote`，改为 Host `ctx.webServer.register({kind:'prefix', path:'/api/engineering-craft'})` 暴露状态与动作，Client `fetch()` 读写。证据：dsh-bili-scroll/dsh-meme 在生产用这条路径（含 loopback 校验）。
 - **OQ-6**：`/ec` 命令用 `ctx.commands.register`，防御性实现（ctx.commands 存在性检查 + try/catch），失败不阻断插件激活；核心能力在 tools 里，命令是便利层。
 - 仍保留：六岗位流水线语义、门纪律、交接物落盘、工程记忆只写规范层——这些是 skill 内核，与承载 API 无关。

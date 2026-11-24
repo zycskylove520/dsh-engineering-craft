@@ -3,9 +3,9 @@
  * TDD：先落测试跑红，再实现 rules.js / gate-service / tools / command 跑绿。
  * mock 只造状态数据与临时项目目录，不 mock 被测函数。
  */
-import { test, describe } from 'node:test'
+import { test, describe, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { nextRole, DEFAULT_PIPELINE } from '../rules.js'
@@ -23,7 +23,7 @@ const DEV_ARTIFACTS = Object.freeze({
 /** 造一份下一岗位为 developer 的状态；plan 单元由用例给定。 */
 function developerState(plan) {
   return {
-    version: 1,
+    version: 2,
     projectRoot: 'E:/demo',
     stage: 'coding',
     gates: {
@@ -108,7 +108,9 @@ describe('nextRole · 研发岗条件并行三道门', () => {
 })
 
 describe('形态 B 透传 · gate-service / ec_stage / /ec', () => {
-  const freshRoot = () => mkdtempSync(join(tmpdir(), 'ec-parallel-'))
+  const madeRoots = []
+  const freshRoot = () => { const r = mkdtempSync(join(tmpdir(), 'ec-parallel-')); madeRoots.push(r); return r }
+  after(() => { for (const r of madeRoots) { try { rmSync(r, { recursive: true, force: true }) } catch { /* 清理失败不影响测试结论 */ } } })
   const tool = ECO_TOOLS.find((t) => t.name === 'ec_stage')
 
   test('gate-service.nextRole 透传 opts：关能力门得形态 A，默认得形态 B', () => {

@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "工程工艺套件",
-    "description": "DSH 内工程流程：阶段门、交接物、工程记忆，以及严格的六岗位 subagent 流水线。",
+    "description": "DSH 内工程流程：阶段门、交接物、工程记忆，以及按序协作的六岗位 subagent 流水线。",
     "detail": "docs/DETAIL.md"
   },
   "panel": {
@@ -13,6 +13,8 @@
     "gatePassed": "已通过",
     "gatePending": "未通过",
     "missingArtifacts": "缺失交接物",
+    "handoffs": "交接物清单",
+    "parallelHint": "并行 {n} 单元",
     "noProject": "未检测到项目",
     "openPanel": "工程面板"
   },

@@ -2,7 +2,7 @@
  * index.js —— @local/dsh-engineering-craft 的 host 半入口（单 row，统一注册全部 host 能力）。
  * ⭐ optional peer 容错：@deepseek-ai/dsh-tools 的 defineTool 与 schemastery 的 z 都从宿主树找，
  *    找不到就本地兜底 / Config=undefined，绝不因一个 import 让整条插件不激活（证据：dsh-bili-scroll）。
- * 门状态存 <projectRoot>/.engineering-craft/state.json；Client 经 /api/engineering-craft/* 读写。
+ * 门状态存 <projectRoot>/.ec-state/state.json；Client 经 /api/engineering-craft/* 读写。
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -124,13 +124,10 @@ export const Config = !hostDeps.z ? undefined : hostDeps.z.object({
     }),
   }).default(DEFAULT_GATES).extra('volatile', true),
   thresholds: hostDeps.z.object({
+    // 研发岗形态 B 收益门：最小并行单元数（沿用旧 Config 名，语义为单元数非文件数）。
     minFilesForParallel: hostDeps.z.natural(),
-    minUnitsForWorkflow: hostDeps.z.natural(),
-  }).default({ minFilesForParallel: 2, minUnitsForWorkflow: 6 }).extra('volatile', true),
-  paths: hostDeps.z.object({
-    memoryDirName: hostDeps.z.string(),
-    artifactsRoot: hostDeps.z.string(),
-  }).default({ memoryDirName: '.project_memory', artifactsRoot: '.' }).extra('volatile', true),
+  }).default({ minFilesForParallel: 2 }).extra('volatile', true),
+  // 记忆目录/产物落点按 skill 标准结构固定（.project_memory/ + 6 职责目录 + tmp/），不开放配置。
 })
 
 /** 仅列必须存在的 service：可选 service（commands/systemPrompt）一律用 ctx.get 容错取。 */
@@ -174,23 +171,37 @@ export function pendingConfirmOf(state) {
  * @param {object} config 已校验的插件 Config
  */
 export function apply(ctx, config) {
-  // 门规则可被 Config 覆盖（缺省用 DEFAULT_GATES）。
-  if (config?.gates) ecGate.gates = { ...DEFAULT_GATES, ...config.gates }
+  // 门规则可被 Config 覆盖（逐门深合并：只覆盖用户给的那扇门，其余保留默认）——避免浅合并丢门。
+  if (config?.gates) {
+    const merged = {}
+    for (const g of ['G1', 'G2', 'G3']) merged[g] = { ...DEFAULT_GATES[g], ...(config.gates[g] || {}) }
+    ecGate.gates = merged
+  }
   // Config 阈值注入形态 B 默认（纯内存）；tools/command 经 EcGate.nextRole 统一读取。
   if (config?.thresholds) setRoleDefaults({ thresholds: config.thresholds })
 
   const defineTool = hostDeps.defineTool
-  // 四个工具统一注册；textOutput + 无损 JSON 包装（dsh-bili-scroll 实测样板）。
+  // 四个工具统一注册；单个工具注册失败只降级、不阻断整插件激活（评审 H-05）。
+  // defineTool 的 schema 校验与 ctx.tools.register 都可能抛，逐个 try/catch。
   for (const spec of ECO_TOOLS) {
-    ctx.tools.register(defineTool({
-      ...spec,
-      output: spec.output || textOutput,
-      async execute(args, exec) { return safe(await spec.execute(args, exec)) },
-    }))
+    try {
+      const tool = defineTool({
+        ...spec,
+        output: spec.output || textOutput,
+        async execute(args, exec) { return safe(await spec.execute(args, exec)) },
+      })
+      ctx.effect(() => ctx.tools.register(tool), `engineering-craft: tool ${spec.name}`)
+    } catch (e) {
+      console.warn(`[engineering-craft] 工具 ${spec.name} 注册失败，已跳过：`, e?.message ?? e)
+    }
   }
 
-  // /ec 命令：便利层，失败不阻断激活。
-  ctx.effect(() => registerEcCommand(ctx), 'engineering-craft: /ec 命令')
+  // /ec 命令：便利层，失败不阻断激活（注册函数自身容错，这里再包一层）。
+  try {
+    ctx.effect(() => registerEcCommand(ctx), 'engineering-craft: /ec 命令')
+  } catch (e) {
+    console.warn('[engineering-craft] /ec 命令注册失败，已降级：', e?.message ?? e)
+  }
 
   // systemPrompt 注入：可选 service，用 ctx.get 容错取（cordis 的 ctx.<未 inject 服务> 会直接抛）。
   try {
@@ -220,7 +231,13 @@ export function apply(ctx, config) {
       chunks.push(c)
     })
     // 收集 Buffer 后一次 UTF-8 解码：避免中文跨 chunk 被拆成乱码。
-    req.on('end', () => { try { finish(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')) } catch { finish({}) } })
+    // 非法 JSON 或非 plain object 用标记返回，由 POST 路由回 400（评审 H-11）。
+    req.on('end', () => {
+      let parsed
+      try { parsed = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') } catch { finish({ __invalidJson: true }); return }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { finish({ __invalidJson: true }); return }
+      finish(parsed)
+    })
     req.on('error', () => finish({}))
   })
 
@@ -264,10 +281,10 @@ export function apply(ctx, config) {
       res.statusCode = typeof rejection === 'number' ? rejection : 403
       res.end()
       return true
-    } catch {
-      res.statusCode = 403
-      res.end()
-      return true
+    } catch (e) {
+      // 栅栏调用异常 ≠ 明确拒绝：fail-open 只记录，不把每个请求都 403（否则面板永久打不开）。
+      console.warn('[engineering-craft] requestRejection 调用异常，跳过该栅栏：', e?.message ?? e)
+      return false
     }
   }
 
@@ -293,7 +310,7 @@ export function apply(ctx, config) {
       if (body.decision === 'reject') {
         const state = ecGate.read(root)
         try {
-          metricsAction({ action: 'record', gate, outcome: 'blocked', reason: '人拍板退回', projectRoot: root })
+          metricsAction({ action: 'record', gate, outcome: '拦住', missing: '人拍板退回', disposition: '下游退回修订', projectRoot: root })
         } catch { /* 度量是旁路，写失败不影响打回语义 */ }
         return {
           ok: true, decision: 'reject', gate,
@@ -308,12 +325,18 @@ export function apply(ctx, config) {
         return { ok: false, error: { code: 'NOT_USER_CONFIRMED', message: 'go/no-go 只能由人拍板', details: {} } }
       }
       const state = ecGate.read(root)
+      // 门序一致性：go/no-go 是评审后的发布拍板，须评审交接物齐或已进入 delivery，
+      // 否则全新项目可一步跳到 release（评审 H-03）。
+      const pendingGate = pendingConfirmOf(state)?.gate
+      if (pendingGate !== 'go-no-go' && !['delivery', 'release'].includes(state.stage)) {
+        return { ok: false, error: { code: 'GATE_ORDER', message: '评审交接物未齐、未到 delivery，不能 go/no-go', details: { stage: state.stage, pendingGate } } }
+      }
       state.releaseDecision = body.decision === 'approve' ? 'go' : 'no-go'
       state.stage = state.releaseDecision === 'go' ? 'release' : 'delivery'
       state.updatedAt = Date.now()
       try {
         // write() 只返回落盘路径（字符串），不可展开；响应要带 EcState 摘要与门状态。
-        ecGate.write(state)
+        ecGate.write(state, root)
         return {
           ok: true, decision: state.releaseDecision,
           stage: state.stage,
@@ -322,12 +345,18 @@ export function apply(ctx, config) {
       }
       catch (e) { return { ok: false, error: { code: 'STORAGE_UNAVAILABLE', message: String(e?.message ?? e) } } }
     }
-    // 与 ec_stage 工具保持一致：HTTP action 也允许调用方显式覆盖并行判据（不传则用 Config 默认）。
+    // HTTP command 动作限定只读子命令（status/next/metrics）：面板经此查询，
+    // 不允许经这条同源路由触发 gate 确认/记忆写入等副作用——那类操作走各自工具与确认卡（评审 H-02）。
     if (body.kind === 'command') {
+      const line = String(body.line ?? '').trim()
+      const sub = (line.startsWith('/ec') ? line.split(/\s+/)[1] : line.split(/\s+/)[0]) ?? 'status'
+      if (!['status', 'next', 'metrics'].includes(sub)) {
+        return { ok: false, error: { code: 'INVALID_INPUT', message: `HTTP command 仅允许只读子命令 status/next/metrics，收到 ${sub}` } }
+      }
       const opts = {}
       if (body.capabilities && typeof body.capabilities === 'object') opts.capabilities = body.capabilities
       if (body.thresholds && typeof body.thresholds === 'object') opts.thresholds = body.thresholds
-      return runEcCommand(String(body.line ?? ''), root, opts)
+      return runEcCommand(line, root, opts)
     }
     return { ok: false, error: { code: 'INVALID_INPUT', message: `未知 action kind ${body.kind}` } }
   }
@@ -376,6 +405,9 @@ export function apply(ctx, config) {
         }
         if (req.method === 'POST' && url.pathname === '/api/engineering-craft/action') {
           const body = await readBody(req)
+          if (body.__invalidJson) {
+            return sendJson(res, 400, { ok: false, error: { code: 'INVALID_JSON', message: '请求体须为合法 JSON 对象' } })
+          }
           const result = runAction(body)
           return sendJson(res, result.ok ? 200 : 400, safe(result))
         }

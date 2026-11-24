@@ -4,15 +4,14 @@
  * 以及 gate-service.safePathWithin 的路径穿越基本拒绝。
  * 纪律：不 mock 被测纯函数；断言具体 code / details / 返回值。
  */
-import { test, describe, afterEach } from 'node:test'
+import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { join, resolve } from 'node:path'
 import { checkGate, nextRole, DEFAULT_PIPELINE } from '../rules.js'
 import { isPosixLabel, resolveFor } from '../ec-path.js'
 import {
   safePathWithin, initialState, statePathOf, DEFAULT_GATES,
-  STATE_DIR_NAME, STATE_FILE_NAME, ecError,
-  dshWorkspaceRoots, resolveAllowedRoot,
+  STATE_DIR_NAME, STATE_FILE_NAME, ecError, resolveAllowedRoot,
 } from '../gate-service.js'
 
 /** 自带门规则表，与 CONTRACT §4.2 默认值一致（不依赖实现内部常量）。 */
@@ -25,7 +24,7 @@ const RULES = {
 /** 最小 EcState；overrides 覆盖顶层字段。 */
 function makeState(over = {}) {
   return {
-    version: 1,
+    version: 2,
     projectRoot: 'E:/demo',
     stage: 'requirements',
     gates: {
@@ -188,47 +187,32 @@ describe('nextRole · 上游交接物缺失与六岗位严格顺序（CONTRACT �
 })
 
 describe('resolveAllowedRoot · projectRoot 为文本标签（无白名单，支持远端路径）', () => {
-  const saved = process.env.EC_ALLOWED_ROOTS
-  afterEach(() => { if (saved === undefined) delete process.env.EC_ALLOWED_ROOTS; else process.env.EC_ALLOWED_ROOTS = saved })
-
-  test('dshWorkspaceRoots 读到本机已登记工作区（纯读、容错，仍保留供其他用途）', () => {
-    const roots = dshWorkspaceRoots()
-    assert.ok(Array.isArray(roots))
-    for (const r of roots) assert.equal(typeof r, 'string')
-  })
-
-  test('远端 POSIX 路径标签原样保留，不被改写成 Windows 盘符（核心解耦）', () => {
-    delete process.env.EC_ALLOWED_ROOTS
+  test('远端 POSIX 路径标签原样保留，不被改写成 Windows 盘符', () => {
     assert.equal(resolveAllowedRoot('/remote/path/to/Project'), '/remote/path/to/Project')
     assert.equal(resolveAllowedRoot('/remote/path/to/Project/'), '/remote/path/to/Project')
   })
 
-  test('原先被白名单拒绝的工作区外路径，现在作为标签放行', () => {
-    delete process.env.EC_ALLOWED_ROOTS
+  test('工作区外路径作为标签放行', () => {
     assert.equal(resolveAllowedRoot('Z:/definitely/outside'), resolve('Z:/definitely/outside'))
   })
 
-  test('空/非字符串标签仍返回 null（唯一拒绝分支）', () => {
-    delete process.env.EC_ALLOWED_ROOTS
+  test('空/非字符串标签返回 null（唯一拒绝分支）', () => {
     assert.equal(resolveAllowedRoot(''), null)
     assert.equal(resolveAllowedRoot('   '), null)
     assert.equal(resolveAllowedRoot(undefined), null)
   })
 
-  test('相对标签按 EC_ALLOWED_ROOTS 第一个基准解析（兼容旧相对语义）', () => {
-    process.env.EC_ALLOWED_ROOTS = 'Z:/explicit-only'
-    assert.equal(resolveAllowedRoot('sub/proj'), resolve('Z:/explicit-only/sub/proj'))
+  test('相对标签按 cwd 解析', () => {
+    assert.equal(resolveAllowedRoot('sub/proj'), resolve(process.cwd(), 'sub/proj'))
   })
 
-  test('绝对路径标签不受 EC_ALLOWED_ROOTS 基准影响', () => {
-    process.env.EC_ALLOWED_ROOTS = 'Z:/explicit-only'
+  test('绝对路径标签原样保留', () => {
     assert.equal(resolveAllowedRoot('D:/other/project'), resolve('D:/other/project'))
-    assert.equal(resolveAllowedRoot('/remote/path/proj'), '/remote/path/proj')
   })
 
-  test('远端 POSIX 标签的 statePathOf 落在 <标签>/.engineering-craft/state.json', () => {
+  test('远端 POSIX 标签的 statePathOf 落在 <标签>/.ec-state/state.json', () => {
     const p = statePathOf('/remote/path/to/Project')
-    assert.equal(p, '/remote/path/to/Project/.engineering-craft/state.json')
+    assert.equal(p, '/remote/path/to/Project/.ec-state/state.json')
   })
 })
 
@@ -322,14 +306,14 @@ describe('safePathWithin · 安全回归（POSIX 标签 + Windows 宿主交叉�
   })
 })
 
-describe('EcState · stateVersion=1 与字段完整性（CONTRACT §9）', () => {
+describe('EcState · stateVersion=2 与字段完整性（CONTRACT §9）', () => {
   const root = 'E:/demo'
 
-  test('initialState.version === 1 且顶层字段齐全', () => {
+  test('initialState.version === 2 且顶层字段齐全', () => {
     const s = initialState(root)
-    assert.equal(s.version, 1)
+    assert.equal(s.version, 2)
     assert.deepEqual(Object.keys(s).sort(),
-      ['artifacts', 'gates', 'metrics', 'pipeline', 'plan', 'projectRoot', 'stage', 'updatedAt', 'version'])
+      ['artifacts', 'gates', 'metrics', 'pipeline', 'plan', 'projectRoot', 'releaseDecision', 'stage', 'updatedAt', 'version'])
   })
 
   test('gates 三门的确认方约束：G1/G2=user，G3=agent；初值 passed=false', () => {
@@ -346,10 +330,10 @@ describe('EcState · stateVersion=1 与字段完整性（CONTRACT §9）', () =>
     }
   })
 
-  test('artifacts 八个键均为 null（含 testReport/findings 扩展键）', () => {
+  test('artifacts 九个键均为 null（含 progress 临时产物键）', () => {
     const s = initialState(root)
     assert.deepEqual(Object.keys(s.artifacts).sort(),
-      ['adr', 'brief', 'contract', 'findings', 'plan', 'prd', 'release', 'testReport'])
+      ['adr', 'brief', 'contract', 'findings', 'plan', 'prd', 'progress', 'release', 'testReport'])
     assert.ok(Object.values(s.artifacts).every((v) => v === null))
   })
 
@@ -363,7 +347,7 @@ describe('EcState · stateVersion=1 与字段完整性（CONTRACT §9）', () =>
     assert.equal(typeof s.projectRoot, 'string')
   })
 
-  test('statePathOf 落在 <root>/.engineering-craft/state.json', () => {
+  test('statePathOf 落在 <root>/.ec-state/state.json', () => {
     const p = statePathOf(root)
     assert.equal(p, join(root, STATE_DIR_NAME, STATE_FILE_NAME))
   })

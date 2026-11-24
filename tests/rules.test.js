@@ -16,7 +16,7 @@ const RULES = {
 /** 造一个最小 EcState；overrides 只覆盖顶层字段。 */
 function makeState(over = {}) {
   return {
-    version: 1,
+    version: 2,
     projectRoot: 'E:/demo',
     stage: 'requirements',
     gates: {

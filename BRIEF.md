@@ -10,7 +10,7 @@
 
 ## 1. 变更摘要（评审视角）
 
-一个 bundle `@local/dsh-engineering-craft`：单 host row（package-root）+ `dsh.client` 自动挂载 client 半；把 engineering-craft skill 的阶段门 / 交接物 / 工程记忆 / 六岗位流水线落地为 4 个工具（`ec_stage`/`ec_artifact`/`ec_memory`/`ec_gate_metrics`）+ `/ec` 命令 + systemPrompt 注入 + `main`/header.actions/`shell.overlay` 三 slot 面板 + `/api/engineering-craft/*` HTTP 桥。门状态按 ADR §10.5 收敛为 `<projectRoot>/.engineering-craft/state.json`，Client 用 `fetch()` 读写；六岗位顺序由 `rules.nextRole` 的 `DEFAULT_PIPELINE` 保证，交接物落盘后由 `EcGate.update` 登记路径指针（artifact 键 + role 键双写）。
+一个 bundle `@local/dsh-engineering-craft`：单 host row（package-root）+ `dsh.client` 自动挂载 client 半；把 engineering-craft skill 的阶段门 / 交接物 / 工程记忆 / 六岗位流水线落地为 4 个工具（`ec_stage`/`ec_artifact`/`ec_memory`/`ec_gate_metrics`）+ `/ec` 命令 + systemPrompt 注入 + `main`/header.actions/`shell.overlay` 三 slot 面板 + `/api/engineering-craft/*` HTTP 桥。门状态按 ADR §10.5 收敛为 `<projectRoot>/.ec-state/state.json`（无兼容：旧版本数据不识别、报错），Client 用 `fetch()` 读写；六岗位顺序由 `rules.nextRole` 的 `DEFAULT_PIPELINE` 保证，交接物落盘后由 `EcGate.update` 登记路径指针（artifact 键 + role 键双写）。
 
 评审圈范围（全部落盘文件）：`index.js`、`client.js`、`gate-service.js`、`rules.js`、`tools.js`、`command.js`、`artifacts.js`、`memory.js`、`metrics.js`、`tests/{rules,boundary,pipeline}.test.js`、`package.json`、`cordis.patch.yml`、`locale/{en,zh}.json`、`PRD.md`、`CONTRACT.md`、`PLAN.md`、`TEST-REPORT.md`、`docs/*`、`icon.svg`、`.project_memory/**`。无 git 仓库（`git status` 返回 `fatal: not a git repository`），按"全部交接物 + 全量代码"圈范围。
 
@@ -45,7 +45,7 @@ TEST-REPORT 自述的 60/60 与 lead 的 61/61 差异已解释：测试岗报告
 | AC2 `ec_stage` 查阶段与门；G1 未过拒下游 | **达成** | [实测] `tools.js:79-91` query 返回 stage/gates/gateResults/missingArtifacts；`rules.js:39-66` checkGate 四拒绝码；`tests/boundary.test.js:56-122`、`tests/rules.test.js` 逐条断言；G3 人确认路径被 `tools.js:62-69` 拒绝 |
 | AC3 `next-role` 六岗位顺序 + 仅上游交接物存在放行 | **达成** | [实测] `rules.js:23-30` DEFAULT_PIPELINE 六岗严格顺序、`rules.js:76-88` 全落盘才放行/部分落盘阻塞缺失键；`tests/boundary.test.js:131-183`、`tests/pipeline.test.js` 逐段实测；`gate-service.js:283-285` 封装 |
 | AC4 `ec_artifact` 六类模板 + 校验结构 | **达成** | [实测] `artifacts.js:13-16` 8 类键（含 testReport/findings）、`artifacts.js:32-40` 模板、`artifacts.js:19-28` schema、`artifacts.js:64-108` create/validate + 指针登记；TEST-REPORT §4.3 E2E-1 实测 create 落 PRD.md |
-| AC5 `ec_memory` init/write/query、只写规范层、带来源+日期 | **达成** | [实测] `memory.js:55-120` 三动作；`memory.js:43-47` `hasProvenance` 强制"来源"+`YYYY-MM-DD`；`memory.js:15` 层白名单；冲突降级 `.project_memory_engineer/`（`memory.js:23-36`） |
+| AC5 `ec_memory` init/write/query/recall、只写规范层、五件套 | **达成（当前行为以 §5 追加节为准）** | [实测] `memory.js:55-120` 三动作；写入一律强制五件套（无 `strict`、无 `hasProvenance`、layer 无 project）；层白名单不含 project；冲突降级 `.project_memory_engineer/`。本行为历史评审版本的描述，已按 2026-11-24 无兼容定稿更新，见文末追加节。 |
 | AC6 `/ec` 五子命令 + prompt 注入含当前门与岗位 | **达成** | [实测] `command.js:16-67` status/next/gate/metrics/memory；`index.js:193-204` systemPrompt.section 注册；`gate-service.js:302-312` promptSection 含阶段/未过门/下一岗位/阻塞；`/ec` 经 `ctx.get('commands')` 容错（`command.js:74-98`） |
 | AC7 Client 面板显示阶段/门/PLAN/岗位树；go-no-go 卡按需出现 | **部分达成（渲染未实测）** | [实测] `client.js:75-115` 面板四块 + 岗位树读 `handoffs[roleKey]`（`:103-106`）；`index.js:156-169` pendingConfirmOf 三分支探针全对（G1/G2/go-no-go）；[未验证] 真实浏览器 slot 渲染；R-01 影响 go-no-go 响应体但不阻断卡片清显 |
 | AC8 locale en+zh 完整、面板用 theme token、无 slot crash | **部分达成** | [实测] `locale/en.json`/`zh.json` 33 行 23 键一一对应；`client.js:51-72` 全用 `--dsw-alias-*` token 且带 fallback；slot 注册有防御 `client.js:171-190`；**但 client 未加载 locale、硬编码中文** → 英文不可达（见风险 2）；slot 无 crash 仅静态推断 |
@@ -63,3 +63,18 @@ TEST-REPORT 自述的 60/60 与 lead 的 61/61 差异已解释：测试岗报告
 - `node --test` 61/61、12 文件语法 OK、AC1 实机 active —— 主线质量满足交付门槛。
 
 VERDICT 见 `FINDINGS.md` 末行。
+
+---
+
+## 2026-11-24 追加修订（不重写上文历史；兼容已彻底移除）
+
+> 用户明确插件尚未使用、不做旧兼容。上文评审原文（含 §1 变更摘要与 AC5 旧描述中的「只读兼容」「来源+日期」措辞）作为历史保留，**现已作废**；当前真实行为如下，以本节为准。
+
+- **状态**：只有 `<projectRoot>/.ec-state/state.json`（v2），没有 `legacyStatePathOf`、不读旧路径、不做 v1 迁移；版本不是 2 直接报 `STORAGE_UNAVAILABLE`。
+- **`ec_memory`**：layer 只有 index/status/open-questions/architecture/conventions/api-contracts/data-model/testing/build/tmp（无 project）；无 `strict`，写入一律强制五件套；无 `hasProvenance`。
+- **`ec_gate_metrics`**：outcome 只接受中文 `拦住|通过|绕过`（不认英文 blocked/passed）；只有 date/stage/gate/outcome/missing/disposition 六字段，无 reason/at/evidencePath/result 兼容字段；旧 gate-log.jsonl 不再读取合并。
+- **路径**：`resolveAllowedRoot` 相对标签按 cwd 解析，不读 `EC_ALLOWED_ROOTS`；`dshWorkspaceRoots()` 已删除。
+- **`ec_artifact`**：path 只能落 `.project_memory/tmp/`，越界 `ARTIFACT_OUTSIDE_TMP`。
+- **测试数**：源码改完后为 **116/116**（上文历史小节中的 61/61、112/112 是当时评审实测，保留原文）。
+
+本轮文档修订不构成新的评审结论，历史 VERDICT 保持 APPROVE。

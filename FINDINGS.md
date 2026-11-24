@@ -17,7 +17,7 @@
 
 **无 blocker / critical。R-01 为 should（真 bug 但不破坏目标用例），R-02/R-03 为 nit。**
 
-> **lead 收尾补记（2026-11-23）**：R-01 已由 lead 在 APPROVE 后收掉——`index.js` go-no-go 成功分支改为先 `ecGate.write(state)` 落盘、再返回 `{ok:true, decision, stage, gates}` 结构化对象（不再展开路径字符串）。独立复验证据：`write()` 返回 string（旧 bug 展开得 `{"0":"C",...}` 已复现），新响应含 stage/gates/decision；`node --check index.js` OK、`node --test` 61/61 仍绿。R-03（工程记忆未同步 §10.5）为 nit，已同步 overview/naming 规范层。**R-02 已于同日补做修复**：client.js 接入 DSH 自带系统插件 `@deepseek-ai/dsh-client-locale`（未引入市场第三方），26 个 UI 文案全走命名空间字典 t()、语言切换即时重渲染；`dsh.client.inject` 加 `@deepseek-ai/dsh-client-locale`；zh/en 26 键 parity 通过、12 文件语法 OK、61/61 测试仍绿。AC8 由"部分达成"升为达成（页面级渲染仍需主人刷新 GUI 实测）。
+> **lead 收尾补记（2026-11-23）**：R-01 已由 lead 在 APPROVE 后收掉——`index.js` go-no-go 成功分支改为先 `ecGate.write(state)` 落盘、再返回 `{ok:true, decision, stage, gates}` 结构化对象（不再展开路径字符串）。独立复验证据：`write()` 返回 string（旧 bug 展开得 `{"0":"C",...}` 已复现），新响应含 stage/gates/decision；`node --check index.js` OK、`node --test` 61/61 仍绿。R-03（工程记忆未同步 §10.5）为 nit，已同步 overview/naming 规范层。**R-02 已于同日补做修复**：client.js 接入 DSH 自带系统插件 `@deepseek-ai/dsh-client-locale`（未引入市场第三方），26 个 UI 文案全走命名空间字典 t()、语言切换即时重渲染；`dsh.client.inject` 加 `@deepseek-ai/dsh-client-locale`；zh/en 23 键 parity 通过、12 文件语法 OK、61/61 测试仍绿（键数按 locale 文件实测）。AC8 由"部分达成"升为达成（页面级渲染仍需主人刷新 GUI 实测）。
 
 ---
 
@@ -56,3 +56,25 @@
 - 4 轮封顶：本轮为第 1 轮，无需退回重做的 critical/high；不再发起后续评审轮。
 
 VERDICT: APPROVE（理由：AC1~AC10 主线达成——AC1 实机 active 无诊断、AC2~AC6/AC10 逻辑与测试双证、AC7/AC9 有 lead/tester 实测证据、AC8 locale 文件完整；12 文件语法 OK、61/61 测试绿、5 条历史 findings 逐条核验闭环；R-01/R-02/R-03 均为不破坏目标用例的 should/nit，其中 R-01 是 go-no-go 响应形状残留缺陷，建议 ops 岗列观察项并尽快小修，但不构成 REQUEST_CHANGES。）
+
+---
+
+## 2026-11-24 对齐修订（不重写上文历史记录）
+
+> 按不遗忘原则，保留本轮评审原文；下文仅登记「对齐 engineering-craft skill 工程记忆系统定稿」后的源码变更，非对历史 findings 结论的改写。
+
+本次 lead 已把源码对齐到工程记忆系统定稿，**仅文档同步描述，未新增/修改任何测试与 .js 源码**：
+
+- `memory.js` 骨架 = 6 职责目录（architecture / conventions / api-contracts / data-model / testing / build，build 独立于 architecture）+ 3 根文件（INDEX.md / status.md / open-questions.md）+ tmp/；所有权标记改为 `.project_memory/` 内空文件 `.engineering-craft`，无标记目录拒写降级 `.project_memory_engineer/`，旧 `.engineering-craft-marker` 删除（与项目根同名 `.engineering-craft/` 状态目录互不冲突；GATE-LOG 仍落 `.engineering-craft/gate-log.jsonl`）。
+- `ec_memory` 新增 `recall`（返回命中 id/kind/file，写入 `.project_memory/tmp/PLAN.md` 的 constraints，逐并行单元各自检索、无命中标「无既有约定」）与 `file` 参数；layer 枚举扩展；写入一律强制五件套校验（`[KIND ID]`+陈述+证据行+记录日期·等级；无 `strict`，不退回来源+日期）。
+- `ec_artifact` 的 `path` 改可选（默认 `.project_memory/tmp/`），新增 `progress`（PROGRESS.md 五节），PLAN 模板加「检索套用约束」与 constraints。
+- state schema 升 version 2（progress 键共 9 交接物键、releaseDecision=null、PLAN constraints）；无兼容：v1 不识别、不迁移，版本不是 2 报 `STORAGE_UNAVAILABLE`；Config 删除死配置 `paths.memoryDirName/artifactsRoot`、`minUnitsForWorkflow`，只留 `gates` 与 `thresholds.minFilesForParallel`（最小并行单元数，默认 2）。
+- 措辞统一为「默认多 agent；只有一个不可分单元时单岗位顺序执行亦合规（非失败）」——无单 agent 降级（DSH 特化，用户明确要求）。本轮文档修订不构成新的评审结论，历史 VERDICT 保持 APPROVE。
+
+### 本轮追加（2026-11-24 收尾 · 状态目录改名 / GATE-LOG 移位 / 产物强制 tmp）
+
+> lead 已在源码落地、116/116 测试通过；本节仅同步文档描述，上文评审原文与历史 VERDICT 保持。上文「与项目根同名 `.engineering-craft/` 状态目录互不冲突」「GATE-LOG 仍落 `.engineering-craft/gate-log.jsonl`」的说法已作废，以本节为准。兼容已彻底移除。本轮文档修订不构成新的评审结论。
+
+- **状态目录改名**：`.engineering-craft/` → **`.ec-state/`**（state.json 新路径 `projectRoot/.ec-state/state.json`）。原因：`.engineering-craft` 按 skill 定义是**记忆目录内的空文件 marker**，不能同时当状态目录名；改名后名字冲突已消除。**无兼容**：旧 `.engineering-craft/state.json` 不读取、不迁移，没有 `legacyStatePathOf`；版本不是 2 直接报 `STORAGE_UNAVAILABLE`。
+- **GATE-LOG 移位**：`.engineering-craft/gate-log.jsonl` → **`.project_memory/tmp/GATE-LOG.md`**，对齐 skill `core/gate-metrics.md` 六字段（日期/阶段/门/结果 拦住\|通过\|绕过/缺什么/处置），每行一条 JSON；**无兼容**：旧 gate-log.jsonl 不再读取合并（不 list 并入、不触发写盘）。`ec_gate_metrics` record 新增 stage/missing/disposition 参数，outcome 只接受中文 拦住\|通过\|绕过（英文 blocked/passed 不识别）。
+- **产物强制 tmp**：`ec_artifact` 的 `path` **只能落在 `.project_memory/tmp/` 内**，传项目根等其他位置返回新错误码 `ARTIFACT_OUTSIDE_TMP`（不再是"可选覆盖"）；不传 path 默认 tmp/。
