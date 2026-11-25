@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-engineering-craft",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "Engineering-craft methodology as an in-DSH workflow suite: stage gates, handoff artifacts, project memory, and a strict six-role subagent pipeline.",
@@ -20,6 +20,7 @@
     "command.js",
     "artifacts.js",
     "memory.js",
+    "active-root.js",
     "metrics.js",
     "cordis.patch.yml",
     "locale/*.json",
@@ -31,7 +32,7 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "check": "node --check index.js && node --check client.js && node --check gate-service.js && node --check ec-path.js && node --check rules.js && node --check tools.js && node --check command.js && node --check artifacts.js && node --check memory.js && node --check metrics.js",
+    "check": "node --check index.js && node --check client.js && node --check gate-service.js && node --check ec-path.js && node --check rules.js && node --check tools.js && node --check command.js && node --check artifacts.js && node --check memory.js && node --check active-root.js && node --check metrics.js",
     "test": "node --test tests/*.test.js"
   },
   "dsh": {

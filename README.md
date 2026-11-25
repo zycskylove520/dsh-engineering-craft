@@ -69,12 +69,14 @@
 |---|---|
 | `ec_stage` | 查阶段/门状态、记录门确认、取下一岗位或并行单元 |
 | `ec_artifact` | 生成交接物模板（落盘 + 登记指针）或校验结构；`path` 省略默认落 `.project_memory/tmp/<文件名>`，且**只能落在 `.project_memory/tmp/` 内**，越界返回 `ARTIFACT_OUTSIDE_TMP`；新增 `progress`（PROGRESS.md 五节 Goal/Done/Next/Open questions/Key facts） |
-| `ec_memory` | `.project_memory/` 建库（6 职责目录 + 3 根文件 + tmp）/ 写规范（一律强制五件套，无 `strict`、不退回来源+日期）/ `query` 按需读 / `recall` 写码前按线索检索全规范层返回 id/kind/file |
+| `ec_memory` | `.project_memory/` 建库（6 职责目录 + 3 根文件 + tmp，职责目录自动带边界声明桩）/ 写规范（**职责目录**强制五件套并附**内容质量软警告**：清单式计数 / 纯行号证据；`tmp` 与 3 根文件 `index/status/open-questions` 免校验、写自由文本如 PLAN/导航/快照）/ `query` 按需读 / `recall` 写码前按线索检索全规范层，**字面整句优先、零命中分词/二元组回退**、按相关性排序、可按 `kind`/`layer` 过滤，返回 id/kind/file/matchMode / `audit` 建库自检 + **qualityScore 质量分**（边界声明、清单式、纯行号证据、**RULE 占比**、**配方覆盖**、**插件实现幻觉**、无 header 散文文件、PLAN 覆盖映射；init 生成的桩豁免无条目扣分、agent 写进桩的散文照常报；≥60 才 passed）/ `patch` 按 id 条目级更新（改正文或加 `状态:` 行，不动其他条目，认 `##` 与 `- [OPEN]` 两种前缀） |
 | `ec_gate_metrics` | GATE-LOG 门度量记录与回看；GATE-LOG 落 `.project_memory/tmp/GATE-LOG.md`（每行一条 JSON，对齐 skill `core/gate-metrics.md` 六字段：日期/阶段/门/结果 拦住\|通过\|绕过/缺什么/处置；无兼容：旧 `.engineering-craft/gate-log.jsonl` 不再读取合并），`record` 支持 stage/missing/disposition 参数、outcome 只接受中文 拦住\|通过\|绕过（英文 blocked/passed 不识别） |
 
 **记忆内容规格与检索闭环**：每条陈述须为 `[KIND ID]`（RULE/FACT/DECISION/OPEN + 稳定 id）+ 正文 + `证据:` 行（文件路径 + 模式描述）+ `记录: YYYY-MM-DD · 实测|推断|用户约定`；禁本机绝对路径，事实等级与核实状态（待复核/已复核）正交分列，行号仅辅助。写入默认强制这套五件套；写码前用 `recall` 检索、把命中 id 列入 PLAN constraints，形成"规范落地 → 检索套用 → 按证据回写"的闭环。
 
-另有 `/ec` 命令（`status` / `next` / `gate` / `metrics` / `memory`）和会话头「工程面板」入口。面板显示阶段、门、计划和岗位树；需要你拍板时弹出确认卡。
+**建库质量闸（会话头常驻提示 + audit 计分）**：只把项目拍成 FACT 照片不算合格——RULE 占比须 ≥35%，高频动作（新增算子/引擎/loss/数据集/backend）须有 ≥3 条带步骤配方且含验证方式；证据主体是"路径 + 模式描述"不是纯行号；清单式计数改写为规律；bug 必须写成 `[OPEN BUG-NN]` 五件套（散文列表进不了 recall）；不得把 `.engineering-craft` 标记等插件自身实现写成项目约定。`ec_memory audit` 把这些逐条计成 `qualityScore`（0–100，<60 判不合格），agent 建库后必须贴报告。
+
+另有 `/ec` 命令（`use` / `which` / `status` / `next` / `gate` / `metrics` / `memory`）和会话头「工程面板」入口。**先用 `/ec use <项目根>` 落定工程目录**（`which` 查当前、`use clear` 清除）：会话头注入的阶段/门状态读这个已确认根，不再读宿主 cwd；未确认时只显示红线、不显示任何阶段的门数字。面板显示阶段、门、计划和岗位树；需要你拍板时弹出确认卡。
 
 ## 配置
 
@@ -105,10 +107,10 @@
 
 ```bash
 node --check <每个 js>          # 语法检查（node >= 22）
-node --test tests/*.test.js     # 单元测试（node:test，零外部依赖，116 项）
+node --test tests/*.test.js     # 单元测试（node:test，零外部依赖）
 ```
 
-测试覆盖门规则纯函数、六岗位推进与研发岗并行三道门、路径穿越防御、交接物→门放行链路（产物落 tmp）、Config 生产接线，以及工程记忆对齐回归（6 目录+3 根文件+tmp、所有权标记、五件套/硬约束、recall 检索闭环、state v2 严格校验（无 v1→v2 迁移、无旧路径兼容）、GATE-LOG 移位）。
+测试覆盖门规则纯函数、六岗位推进与研发岗并行三道门、路径穿越防御、交接物→门放行链路（产物落 tmp）、Config 生产接线，以及工程记忆对齐回归（6 目录+3 根文件+tmp、所有权标记、五件套/硬约束、recall 相关性排序与过滤、内容质量软警告、tmp/根文件自由文本、audit 自检与桩豁免、patch 条目级更新与列表前缀/幽灵条目防丢失、state v2 严格校验（无 v1→v2 迁移、无旧路径兼容）、GATE-LOG 移位）。运行 `npm test` 查看当前全绿读数。
 
 ## 许可证
 

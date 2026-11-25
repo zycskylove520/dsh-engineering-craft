@@ -5,8 +5,9 @@
  */
 import { ecGate } from './tools.js'
 import { metricsAction } from './metrics.js'
-import { memoryAction } from './memory.js'
+import { memoryAction, LAYERS } from './memory.js'
 import { ecError, resolveAllowedRoot, DOMAIN_CODES } from './gate-service.js'
+import { readActiveRoot, writeActiveRoot, clearActiveRoot } from './active-root.js'
 
 /**
  * 解析并执行一行 /ec 子命令（纯逻辑，便于 Host 与 HTTP action 复用）。
@@ -27,6 +28,23 @@ export function runEcCommand(line, projectRoot, opts = {}) {
   const rest = parts.slice(parts[0] === '/ec' ? 2 : 1)
 
   try {
+    // P0-3：确认并持久化"当前工程根"。/ec use <path> 只在用户显式调用时执行；
+    // promptSection 读它，避免用 process.cwd() 注入错项目的阶段/门数字。
+    if (sub === 'use') {
+      const target = rest.join(' ')
+      if (!target) {
+        return { ok: true, command: 'use', root: readActiveRoot(), hint: '用法：/ec use <项目根>；/ec use clear 清除' }
+      }
+      if (target === 'clear') {
+        const r = clearActiveRoot()
+        return { ...r, command: 'use', root: null }
+      }
+      const r = writeActiveRoot(target)
+      return { ...r, command: 'use' }
+    }
+    if (sub === 'which') {
+      return { ok: true, command: 'which', root: readActiveRoot() }
+    }
     if (sub === 'status') {
       const state = ecGate.read(root)
       const role = ecGate.nextRole(root, opts)
@@ -75,14 +93,31 @@ export function runEcCommand(line, projectRoot, opts = {}) {
       const named = rest.filter((a) => a.startsWith('--'))
       const positional = rest.slice(1).filter((a) => !a.startsWith('--'))
       // 未知 flag 直接拒绝，不静默丢弃（评审 F15）。
-      const knownFlags = named.filter((a) => a.startsWith('--file='))
-      const unknown = named.filter((a) => !a.startsWith('--file='))
+      const allowedFlags = ['--file=', '--id=', '--status=', '--kind=']
+      const knownFlags = named.filter((a) => allowedFlags.some((f) => a.startsWith(f)))
+      const unknown = named.filter((a) => !allowedFlags.some((f) => a.startsWith(f)))
       if (unknown.length) {
         return { ok: false, error: ecError('INVALID_INPUT', `未知 /ec memory 参数：${unknown.join(' ')}`, { unknown }) }
       }
-      const layer = positional[0]
-      const query = positional.slice(1).join(' ') || undefined
-      const fileArg = knownFlags[0]?.slice(7)
+      const flag = (prefix) => knownFlags.find((a) => a.startsWith(prefix))?.slice(prefix.length) || undefined
+      // FIX-memory-recall-arg：recall/query 是"线索优先"，layer 是可选过滤器。
+      // 旧实现把第一个位置参数无条件当 layer，导致 `/ec memory recall 依赖注入`（单参数）报
+      // "非法规范层 依赖注入"。现在：首个位置参数若是合法 layer 且后面还有内容，才当 layer；
+      // 否则整段都是 query。写/audit/init 等 action 仍按原样（layer 就是第一个位置参数）。
+      let layer
+      let query
+      const first = positional[0]
+      const restQuery = positional.slice(1).join(' ')
+      if ((action === 'recall' || action === 'query') && first && !LAYERS.includes(first)) {
+        // 首个位置参数不是合法 layer → 整段都是线索（单参数 recall 不再报"非法规范层"）
+        layer = undefined
+        query = positional.join(' ') || undefined
+      } else {
+        // 合法 layer（含 layer-only recall：recall conventions）或写入类 action
+        layer = first
+        query = restQuery || undefined
+      }
+      const fileArg = flag('--file=')
       if (fileArg === '') {
         return { ok: false, error: ecError('INVALID_INPUT', '--file= 不能为空') }
       }
@@ -91,7 +126,10 @@ export function runEcCommand(line, projectRoot, opts = {}) {
           action, layer, query, projectRoot: root,
           // write 的正文取线索位（/ec memory write conventions <正文>）；其余 action 用 query。
           content: action === 'write' ? query : undefined,
-          file: fileArg || undefined,
+          file: fileArg,
+          id: flag('--id='),
+          status: flag('--status='),
+          kind: flag('--kind='),
         }),
         command: 'memory',
       }
@@ -121,7 +159,7 @@ export function registerEcCommand(ctx) {
   try {
     const dispose = commands.register({
       name: '/ec',
-      description: '工程套件统一入口：status / next / gate / metrics / memory（memory 支持 init/write/query/recall）',
+      description: '工程套件统一入口：use / which / status / next / gate / metrics / memory（memory 支持 init/write/query/recall/audit/patch）',
       async execute(agent, line) {
         // runEcCommand 自身不抛（内部 try/catch）；这里仅兜底未预期的注册层异常。
         return runEcCommand(line)

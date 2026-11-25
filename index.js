@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import EcGate, { DEFAULT_GATES, normalizeProjectRoot, safePathWithin, resolveAllowedRoot, statePathOf, setRoleDefaults } from './gate-service.js'
 import { ECO_TOOLS, ecGate } from './tools.js'
 import { registerEcCommand, runEcCommand } from './command.js'
+import { readActiveRoot } from './active-root.js'
 import { metricsAction } from './metrics.js'
 
 /** 插件自己那棵树（optionalDependencies 装出来的那份），用模块位置算，不依赖 cwd。 */
@@ -209,7 +210,8 @@ export function apply(ctx, config) {
     if (sp && typeof sp.section === 'function') {
       ctx.effect(() => sp.section({
         key: 'engineering-craft',
-        render: () => ecGate.promptSection(process.cwd()),
+        // P0-3：读用户显式确认的项目根，不再用宿主 cwd（cwd 常与工程目录不一致）。
+        render: () => ecGate.promptSection(readActiveRoot()),
       }), 'engineering-craft: prompt 门状态')
     }
   } catch (e) {

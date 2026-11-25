@@ -59,7 +59,8 @@ export const ecStageTool = {
       },
       projectRoot: { type: 'string', description: '项目根路径标签（本机或远端均可，如 /remote/path/to/Project）；不做存在性校验，缺省用当前工作目录' },
     },
-    required: ['mode'],
+    // FIX-required-default：mode 有 default='query'，不再列 required——否则 execute 的
+    // args.mode ?? 'query' 兜底永远不生效，省略 mode 的调用在 schema 层就被拒。
     additionalProperties: false,
   },
   async execute(args, exec) {
@@ -131,7 +132,7 @@ export const ecArtifactTool = {
     properties: {
       action: { type: 'string', enum: ['create', 'validate'], description: 'create=写模板；validate=只读校验' },
       kind: { type: 'string', enum: ['prd', 'adr', 'contract', 'plan', 'brief', 'release', 'testReport', 'findings', 'progress'] },
-      path: { type: 'string', description: '目标路径（省略则落 .project_memory/tmp/<文件名>）；必须落在 .project_memory/tmp/ 内，越界返回 ARTIFACT_OUTSIDE_TMP' },
+      path: { type: 'string', description: '目标路径（省略则落 .project_memory/tmp/<文件名>）；必须落在 .project_memory/tmp/ 内——落在项目根外返回 PATH_OUT_OF_ROOT，落在项目根内但 tmp 外返回 ARTIFACT_OUTSIDE_TMP' },
       projectRoot: { type: 'string', description: '项目根路径标签（本机或远端均可，如 /remote/path/to/Project）；不做存在性校验，缺省用当前工作目录' },
     },
     required: ['action', 'kind'],
@@ -161,23 +162,26 @@ export const ecArtifactTool = {
  */
 export const ecMemoryTool = {
   name: 'ec_memory',
-  description: '初始化或按 INDEX 线索读写 .project_memory/ 工程记忆（6 职责目录+3 根文件+tmp）；recall=写码前检索套用，命中条目 id 列入 PLAN constraints。',
+  description: '初始化或按 INDEX 线索读写 .project_memory/ 工程记忆（6 职责目录+3 根文件+tmp）；write=写规范（职责目录强制五件套+内容质量软警告，tmp 与 3 根文件 index/status/open-questions 免校验自由文本）；recall=写码前检索套用（字面整句优先、零命中时分词/二元组回退；相关性排序），命中条目 id 列入 PLAN constraints；audit=建库自检并给 qualityScore（RULE 占比/配方覆盖/证据模式/清单式/幻觉条目/PLAN），qualityScore≥60 才算过自检；patch=按 id 条目级更新。写记忆时优先写可套用的 RULE 配方（抄哪个文件→改哪几处→怎么验证），少写 FACT 清单；bug 用 [OPEN ID] 五件套，别写成散文。\n五件套落盘格式（职责目录 write 必须逐行齐全，缺一即 INVALID_MEMORY_ENTRY）：\n  ## [RULE R-XXX-01] 一句话规则\n  证据: 项目内相对路径（模式描述，不写瞬时行号；行号可放括号辅助）\n  记录: YYYY-MM-DD · 实测|推断|用户约定\n（标题前缀 ## 可省，但 kind、稳定 id、证据行、记录行四者缺一不可；证据须指向模式而非仅路径:行号；等级与状态正交，状态另起「状态: 待复核/已复核」行。tmp 与 3 根文件免校验——根文件是导航/快照/清单，写成五件套也行但不强制。）\naudit 扣分维度可直接对照其 warnings 的 rule 字段：low-rule-ratio（RULE 占比<35%）、few-recipes（配方<3 条）、recipe-no-verify、list-not-rule（陈述含计数/顿号并列清单）、evidence-no-pattern（证据只有路径:行号）、plugin-internal-as-project-fact、missing-boundary（每篇开头缺「本篇管…不管…」）、single-file-dump（目录≥8 条却只写 overview.md）、missing-plan。注意：职责目录的 overview.md 是 init 生成的边界声明导航桩，audit 已豁免其 no-five-part-entries（不会因空桩扣 48 分）；但真正主题文件散文无条目仍会报。改完重跑 audit 看 qualityScore。',
   parameters: {
     type: 'object',
     properties: {
       action: {
-        type: 'string', enum: ['init', 'write', 'query', 'recall'],
-        description: 'init=建骨架（6目录+3根文件+标记+tmp）；write=写规范（五件套校验，单行五件套自动分条）；query=按需读；recall=检索套用（返回 id/kind 供 PLAN.constraints）',
+        type: 'string', enum: ['init', 'write', 'query', 'recall', 'audit', 'patch'],
+        description: 'init=建骨架（6目录+3根文件+标记+tmp，职责目录各建 overview.md 桩）；write=写规范（职责目录五件套校验+内容软警告：清单式/纯行号证据/插件实现幻觉/overview 过大；tmp 与 3 根文件免校验自由文本；file 参数指定主题文件名，职责目录按主题分篇，overview 只留总览）；query=按需读；recall=检索套用（字面整句优先，零命中分词/二元组回退，按相关性排序返回 id/kind/matchMode）；audit=建库自检并给 qualityScore（RULE占比/配方覆盖/证据模式/清单式/幻觉/PLAN/单篇堆积，≥60 合格；init 的 overview 桩已豁免 no-five-part-entries）；patch=按 id 改一条（content 或 status）',
       },
       projectRoot: { type: 'string', description: '项目根路径标签（本机或远端均可，如 /remote/path/to/Project）；不做存在性校验，缺省用当前工作目录' },
       layer: {
         type: 'string',
         enum: ['index', 'status', 'open-questions', 'architecture', 'conventions', 'api-contracts', 'data-model', 'testing', 'build', 'tmp'],
-        description: 'write/query 的目标层：根文件或职责目录',
+        description: 'write/query/patch 的目标层；recall 时作为可选目录过滤',
       },
       file: { type: 'string', description: '职责目录内的文件名（如 architecture/engine.md 的 engine，省略默认 overview）' },
-      content: { type: 'string', description: 'write 时正文；须合五件套（[KIND ID] + 陈述 + 证据: + 记录: 日期·等级）' },
-      query: { type: 'string', description: 'query/recall 的检索线索（recall 会全规范层扫描，返回命中 id/kind）' },
+      content: { type: 'string', description: 'write 时正文（职责目录须五件套；tmp 与 index/status/open-questions 三根文件自由文本）；patch 时为该条新正文' },
+      query: { type: 'string', description: 'query/recall 的检索线索（recall 全规范层扫描，字面整句优先、零命中分词回退，按相关性排序返回 id/kind/matchMode）' },
+      kind: { type: 'string', enum: ['RULE', 'FACT', 'DECISION', 'OPEN'], description: 'recall 时按陈述类型过滤' },
+      id: { type: 'string', description: 'patch 时的稳定 id（须在目标文件内唯一命中）' },
+      status: { type: 'string', description: 'patch 时追加/替换「状态: 」行（如 已复核/待复核）' },
     },
     required: ['action'],
     additionalProperties: false,
@@ -213,7 +217,8 @@ export const ecGateMetricsTool = {
       limit: { type: 'integer', minimum: 1, maximum: 100, default: 20, description: 'list 时最多返回条数' },
       projectRoot: { type: 'string', description: '项目根路径标签（本机或远端均可，如 /remote/path/to/Project）；不做存在性校验，缺省用当前工作目录' },
     },
-    required: ['action'],
+    // FIX-required-default：action 有 default='list'，不列 required，省略时 execute 兜底生效。
+    // removals: required: ['action']
     additionalProperties: false,
   },
   async execute(args, exec) {

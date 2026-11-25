@@ -54,7 +54,8 @@ export function checkGate(gateId, state, rule) {
   }
   // 需人拍板的门：确认方必须是 user 且记录过确认时刻（at），两者缺一即 NOT_USER_CONFIRMED。
   // 这比笼统的 passed=false 更具体，面板可直接提示"等人确认"。
-  if (rule?.requireUserConfirm && (gate.confirmedBy !== 'user' || !gate.at)) {
+  // FIX-gate-at-zero：用显式 null/undefined 判断，不用 falsy（at=0 也曾经算"已确认"的歧义）。
+  if (rule?.requireUserConfirm && (gate.confirmedBy !== 'user' || gate.at == null)) {
     return fail('NOT_USER_CONFIRMED', `门 ${gateId} 需要人确认，当前确认方=${gate.confirmedBy ?? 'null'} at=${gate.at ?? 'null'}`, { gateId })
   }
   if (rule?.requireEvidence && !gate.evidence) {
@@ -134,7 +135,9 @@ function parallelUnits(state, opts) {
     if (ids.has(u.id)) return null // id 重复也算不可判定
     ids.add(u.id)
     for (const file of u.ownerFiles) {
-      const key = posix.normalize(String(file).replace(/\\/g, '/')).toLowerCase()
+      // FIX-shape-trailing-slash：折叠尾部斜杠，否则 'src/a.js' 与 'src/a.js/' 视为不同文件，
+      // 两个并行单元可写同一文件互相覆盖。去尾部 /（保留根 '/' 语义与本判定无关）。
+      const key = posix.normalize(String(file).replace(/\\/g, '/')).toLowerCase().replace(/\/+$/, '')
       if (seen.has(key)) return null
       seen.add(key)
     }
