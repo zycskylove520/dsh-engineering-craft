@@ -80,6 +80,23 @@ export function runEcCommand(line, projectRoot, opts = {}) {
       else r = ecGate.recordVerify(root, { command: flag('cmd'), outputDigest: flag('out') })
       return r.ok ? { ok: true, command: sub, stage: r.value.stage } : r
     }
+    if (sub === 'plan') {
+      // 结构化 PLAN 单元落 state.plan：--units 后接 JSON 数组字符串（与 ec_stage mode=plan 同源）。
+      // JSON 常含空格与嵌套 []，不能用按空白切分的 rest。取 --units 之后到行尾的内容，
+      // 剥掉可选的单/双引号包裹；剩余即完整 JSON 文本。
+      const original = String(line)
+      const idx = original.indexOf('--units')
+      let raw = idx >= 0 ? original.slice(idx + '--units'.length).trim() : ''
+      if (raw.length >= 2 && ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'")))) {
+        raw = raw.slice(1, -1)
+      }
+      let units
+      try { units = JSON.parse(raw) } catch {
+        return { ok: false, error: ecError('INVALID_INPUT', '/ec plan 的 --units 须为 JSON 数组字符串') }
+      }
+      const r = ecGate.setPlan(root, units)
+      return r.ok ? { ok: true, command: 'plan', plan: r.value.plan, stage: r.value.stage } : r
+    }
     if (sub === 'gate') {
       const gate = (rest[0] ?? '').toUpperCase()
       if (!['G1', 'G2', 'G3'].includes(gate)) {
@@ -175,7 +192,7 @@ export function registerEcCommand(ctx) {
   try {
     const dispose = commands.register({
       name: '/ec',
-      description: '工程套件统一入口：use / which / status / next / new-task / tdd / green / verify / gate / metrics / memory（tdd=记红灯 --test X --out Y；verify=记验证 --cmd "..." --out "..."；gate G3=过证据门 --cmd "..." --out "..."（与 verify 同形）；memory 支持 init/write/query/recall/audit/patch）',
+      description: '工程套件统一入口：use / which / status / next / new-task / tdd / green / verify / plan / gate / metrics / memory（tdd=记红灯 --test X --out Y；verify=记验证 --cmd "..." --out "..."；plan=落结构化单元 --units \'[{"id":"P1",...}]\'（同步 state.plan）；gate G3=过证据门 --cmd "..." --out "..."（与 verify 同形）；memory 支持 init/write/query/recall/audit/patch）',
       async execute(agent, line) {
         // runEcCommand 自身不抛（内部 try/catch）；这里仅兜底未预期的注册层异常。
         return runEcCommand(line)

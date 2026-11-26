@@ -39,14 +39,31 @@ export const ecStageTool = {
     type: 'object',
     properties: {
       mode: {
-        type: 'string', enum: ['query', 'confirm-gate', 'next-role', 'new-task', 'tdd', 'green', 'verify'], default: 'query',
-        description: 'query=只读状态；confirm-gate=记录人确认/证据（G3 须同时给 command+outputDigest，与 verify 同形）；next-role=返回下一岗位；new-task=归档旧 state 并重置（工程记忆不动）；tdd=记录 TDD 红灯（failingTest 必填，写生产代码前先有失败测试）；green=记录测试转绿；verify=记录一条验证证据（command+outputDigest，宣称完成前必须先跑并落证据）。识别到新需求先 new-task，再严格走六岗，开发岗必须先 tdd 再写代码',
+        type: 'string', enum: ['query', 'confirm-gate', 'next-role', 'new-task', 'tdd', 'green', 'verify', 'plan'], default: 'query',
+        description: 'query=只读状态；confirm-gate=记录人确认/证据（G3 须同时给 command+outputDigest，与 verify 同形）；next-role=返回下一岗位；new-task=归档旧 state 并重置（工程记忆不动）；tdd=记录 TDD 红灯（failingTest 必填，写生产代码前先有失败测试）；green=记录测试转绿；verify=记录一条验证证据（command+outputDigest，宣称完成前必须先跑并落证据）；plan=落盘结构化 PLAN 单元（units 数组，state.plan 的唯一写入口；写完 PLAN.md 必须调此把单元同步进 state）。识别到新需求先 new-task，再严格走六岗，开发岗必须先 tdd 再写代码',
       },
       gate: { type: 'string', enum: ['G1', 'G2', 'G3'], description: 'confirm-gate 时必填' },
       command: { type: 'string', description: 'mode=verify 及 G3 confirm-gate 时必填：本次真实运行的命令（G3 证据 = command + outputDigest，与 verify 完全一致）' },
       userConfirmed: { type: 'boolean', description: 'G1/G2 confirm-gate 时必填：确认卡由人点过才置 true，agent 不得自报' },
       failingTest: { type: 'string', description: 'mode=tdd 时必填：失败测试文件/用例指针（红灯证据）' },
       outputDigest: { type: 'string', description: 'mode=tdd/green/verify 及 G3 confirm-gate 时必填：本次真实运行的命令输出摘要（非全文）' },
+      units: {
+        type: 'array',
+        description: 'mode=plan 时必填：PLAN 单元数组，每项 {id, target, ownerFiles:[...], acceptance, status(todo|doing|done), constraints:[记忆id...]}；写入 state.plan（全量替换）',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: '单元稳定 id（P1/P2/...），不可重复' },
+            target: { type: 'string', description: '单元目标' },
+            ownerFiles: { type: 'array', items: { type: 'string' }, description: '该单元独占的文件（并行单元之间不得重叠）' },
+            acceptance: { type: 'string', description: '验收标准' },
+            status: { type: 'string', enum: ['todo', 'doing', 'done'], default: 'todo' },
+            constraints: { type: 'array', items: { type: 'string' }, description: '写码前 recall 命中的工程记忆条目 id；无命中标「无既有约定」' },
+          },
+          required: ['id'],
+          additionalProperties: false,
+        },
+      },
       capabilities: {
         type: 'object',
         properties: { subagent: { type: 'boolean', description: '能力门：false 关闭研发岗形态 B，退回形态 A 顺序岗位' } },
@@ -93,6 +110,10 @@ export const ecStageTool = {
       if (mode === 'verify') {
         const r = ecGate.recordVerify(root, { command: args.command, outputDigest: args.outputDigest })
         return r.ok ? { ok: true, mode, checks: r.value.verification.checks.length, stage: r.value.stage } : r
+      }
+      if (mode === 'plan') {
+        const r = ecGate.setPlan(root, args.units)
+        return r.ok ? { ok: true, mode, plan: r.value.plan, stage: r.value.stage } : r
       }
       if (mode === 'confirm-gate') {
         if (!args.gate) return { ok: false, error: ecError('INVALID_INPUT', 'confirm-gate 须指定 gate', {}) }

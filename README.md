@@ -29,11 +29,13 @@
 
 ### 1. 第一次用（空项目）
 
-对 agent 说「开始工程」+ 你要做什么。它**先问你一句**是否在 `<当前会话所处目录>` 进行工程构建（默认候选取会话目录，不是 DSH 自己的 profile 目录）——你确认或换个路径后才动手；所有 `ec_*` 工具的 `projectRoot` 都会显式用这个已确认目录。之后它会和你商谈**架构、语言、命名、技术栈**（不凭空替你决定），把约定落成项目规范，再进入需求澄清。你只需回答问题、在关键处拍板。
+对 agent 说「开始工程」+ 你要做什么。**第一步它一定会先问你一句**是否在 `<当前会话所处目录>` 进行工程构建（默认候选取会话目录，不是 DSH 自己的 profile 目录）——这是**强制前置询问**，发生在任何目录状态判断之前，不可跳过、不可被"直接建库"绕过；你确认或换个路径后它才用 `/ec use` 落定项目根，所有 `ec_*` 工具的 `projectRoot` 都显式用这个已确认目录。**落定之后**才按目录实际状态分三种情况走（见下节）。空项目接下来它会和你商谈**架构、语言、命名、技术栈**（不凭空替你决定），把约定落成项目规范，再进入需求澄清。你只需回答问题、在关键处拍板。
 
 ### 2. 融入已有项目
 
-- **有代码、尚无记忆**：它通读源码，沉淀出这个项目的架构、命名和习惯（每条带文件路径证据），指出不合理设计并和你协商，再建起 `.project_memory/`——标准骨架为 **6 个职责目录**（architecture / conventions / api-contracts / data-model / testing / build，build 独立于 architecture）+ **3 个根文件**（INDEX.md / status.md / open-questions.md）+ **tmp/** 执行产物区，全部建好、内容可薄但不缺位；目录所有权用空文件 `.engineering-craft` 标记。不擅自大改。
+> 以下三种情况都在**第一步"是否在此目录构建"的强制前置询问并落定项目根之后**才判断。这里的"不询问"仅指不再拿"从哪一步起"打断你，不含目录确认那一问。
+
+- **有代码、尚无记忆**：**不询问、直接建库**——它通读源码，沉淀出这个项目的架构、命名和习惯（每条带文件路径证据），建起 `.project_memory/` 后再向你汇报（不合理设计在汇报时提出、协商，不拿"要不要建库"来打断你）——标准骨架为 **6 个职责目录**（architecture / conventions / api-contracts / data-model / testing / build，build 独立于 architecture）+ **3 个根文件**（INDEX.md / status.md / open-questions.md）+ **tmp/** 执行产物区，全部建好、内容可薄但不缺位；目录所有权用空文件 `.engineering-craft` 标记。不擅自大改。只有**空目录**或**已有记忆库**时才反问你下一步怎么做。
 - **代码和记忆都在**：先读 `INDEX.md` 按现有约定干活，不重写你的规矩；写业务/核心代码前用 `ec_memory recall` 按线索检索全规范层，把命中条目 id 列入 `.project_memory/tmp/PLAN.md` 的 constraints（每个并行单元各自检索，无命中标「无既有约定」）。
 
 ### 3. 下一次
@@ -67,7 +69,7 @@
 
 | 工具 | 作用 |
 |---|---|
-| `ec_stage` | 查阶段/门状态、记录门确认、取下一岗位或并行单元、开新任务（`new-task`），以及记录 TDD 红绿灯（`tdd`/`green`）与验证证据（`verify`）。**TDD 与验证是机械硬门**：没有红灯记录、没有验证证据，G3 直接拦住（`TDD_RED_MISSING`/`VERIFY_MISSING`），不能宣称完成 |
+| `ec_stage` | 查阶段/门状态、记录门确认、取下一岗位或并行单元、开新任务（`new-task`），记录 TDD 红绿灯（`tdd`/`green`）与验证证据（`verify`），以及落盘结构化 PLAN 单元（`plan`，`state.plan` 的唯一写入口；写完 `PLAN.md` 必须调此同步）。**TDD 与验证是机械硬门**：没有红灯记录、没有验证证据，G3 直接拦住（`TDD_RED_MISSING`/`VERIFY_MISSING`），不能宣称完成 |
 | `ec_artifact` | 生成交接物模板（落盘 + 登记指针）或校验结构；`path` 省略默认落 `.project_memory/tmp/<文件名>`，且**只能落在 `.project_memory/tmp/` 内**，越界返回 `ARTIFACT_OUTSIDE_TMP`；新增 `progress`（PROGRESS.md 五节 Goal/Done/Next/Open questions/Key facts） |
 | `ec_memory` | `.project_memory/` 建库（6 职责目录 + 3 根文件 + tmp，职责目录自动带边界声明桩）/ 写规范（**职责目录**强制五件套并附**内容质量软警告**：清单式计数 / 纯行号证据；`tmp` 与 3 根文件 `index/status/open-questions` 免校验、写自由文本如 PLAN/导航/快照）/ `query` 按需读 / `recall` 写码前按线索检索全规范层，**字面整句优先、零命中分词/二元组回退**、按相关性排序、可按 `kind`/`layer` 过滤，返回 id/kind/file/matchMode / `audit` 建库自检 + **qualityScore 质量分**（边界声明、清单式、纯行号证据、**RULE 占比**、**配方覆盖**、**插件实现幻觉**、无 header 散文文件、PLAN 覆盖映射；init 生成的桩豁免无条目扣分、agent 写进桩的散文照常报；≥60 才 passed）/ `patch` 按 id 条目级更新（改正文或加 `状态:` 行，不动其他条目，认 `##` 与 `- [OPEN]` 两种前缀） |
 | `ec_gate_metrics` | GATE-LOG 门度量记录与回看；GATE-LOG 落 `.project_memory/tmp/GATE-LOG.md`（每行一条 JSON，对齐 skill `core/gate-metrics.md` 六字段：日期/阶段/门/结果 拦住\|通过\|绕过/缺什么/处置；无兼容：旧 `.engineering-craft/gate-log.jsonl` 不再读取合并），`record` 支持 stage/missing/disposition 参数、outcome 只接受中文 拦住\|通过\|绕过（英文 blocked/passed 不识别） |

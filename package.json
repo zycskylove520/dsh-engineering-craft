@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-engineering-craft",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "type": "module",
   "description": "Engineering-craft methodology as an in-DSH workflow suite: stage gates, handoff artifacts, project memory, and a strict six-role subagent pipeline.",

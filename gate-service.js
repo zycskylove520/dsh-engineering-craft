@@ -518,6 +518,62 @@ export default class EcGate {
   }
 
   /**
+   * 落盘结构化 PLAN 单元——state.plan 的唯一写入口（历史缺口：此前只有 update() 能
+   * "改已存在的单元"，没有任何入口能"新增单元"，agent 写完 PLAN.md 后 state.plan 永远 []）。
+   * @param {string} projectRoot 项目根
+   * @param {Array<{id:string,target?:string,ownerFiles?:string[],acceptance?:string,status?:string,constraints?:string[]}>} units 单元数组
+   * @returns {{ok:true,value:object}|{ok:false,error:object}} Result<EcState, EcError>
+   */
+  setPlan(projectRoot, units) {
+    if (!Array.isArray(units)) {
+      return fail(ecError('INVALID_INPUT', 'PLAN 单元须为数组', {}))
+    }
+    if (units.length > 50) {
+      return fail(ecError('INVALID_INPUT', 'PLAN 单元数超过上限 50', { count: units.length }))
+    }
+    const normalized = []
+    const seen = new Set()
+    for (const [i, u] of units.entries()) {
+      if (!u || typeof u !== 'object' || Array.isArray(u)) {
+        return fail(ecError('INVALID_INPUT', `PLAN 单元 #${i + 1} 不是对象`, { index: i }))
+      }
+      const id = String(u.id ?? '').trim()
+      if (!id) return fail(ecError('INVALID_INPUT', `PLAN 单元 #${i + 1} 缺 id`, { index: i }))
+      if (seen.has(id)) return fail(ecError('INVALID_INPUT', `PLAN 单元 id 重复：${id}`, { index: i, id }))
+      seen.add(id)
+      const ownerFiles = u.ownerFiles == null ? [] : u.ownerFiles
+      if (!Array.isArray(ownerFiles) || ownerFiles.some((f) => typeof f !== 'string')) {
+        return fail(ecError('INVALID_INPUT', `PLAN 单元 ${id} 的 ownerFiles 须为字符串数组`, { id }))
+      }
+      const status = u.status == null ? 'todo' : String(u.status)
+      if (!['todo', 'doing', 'done'].includes(status)) {
+        return fail(ecError('INVALID_INPUT', `PLAN 单元 ${id} 状态非法：${status}`, { id, status }))
+      }
+      const constraints = u.constraints == null ? [] : u.constraints
+      if (!Array.isArray(constraints) || constraints.some((c) => typeof c !== 'string')) {
+        return fail(ecError('INVALID_INPUT', `PLAN 单元 ${id} 的 constraints 须为字符串数组`, { id }))
+      }
+      normalized.push({
+        id,
+        target: String(u.target ?? '').slice(0, 300),
+        ownerFiles: ownerFiles.slice(0, 100),
+        acceptance: String(u.acceptance ?? '').slice(0, 300),
+        status,
+        constraints: constraints.filter((c) => c.trim()).slice(0, 100),
+      })
+    }
+    try {
+      const state = this.read(projectRoot)
+      state.plan = normalized
+      state.updatedAt = Date.now()
+      this.write(state, projectRoot)
+      return ok(state)
+    } catch (e) {
+      return fail(ecError('STORAGE_UNAVAILABLE', `PLAN 落盘失败：${e?.message ?? e}`, {}))
+    }
+  }
+
+  /**
    * 更新交接物路径指针或 PLAN 单元状态（路径须落在 projectRoot 标签内，防 .. 穿越）。
    * @param {string} projectRoot 项目根
    * @param {{artifact?: string, path?: string, planId?: string, planStatus?: string,
@@ -595,8 +651,8 @@ export default class EcGate {
     // P0-3：没有已确认项目根时，只输出红线，不输出任何阶段/门数字（宁可少说，别说错项目的）。
     if (!projectRoot) {
       return [
-        '工程套件：尚未确认项目根。收到「开始工程」时：取当前会话目录作候选，问用户是否在 `<该目录>` 构建并等确认；确认前不写文件。',
-        '用户确认后用 `/ec use <项目根>` 落定；之后所有 ec_* 工具显式传该 projectRoot（勿用宿主 cwd）。',
+        '工程套件：尚未确认项目根。收到「开始工程」时，第一步必须先问用户一句「是否在 `<当前会话目录>` 进行工程构建」（候选取会话目录，不是 DSH profile 目录），等用户确认或换路径——这是强制前置步骤，发生在下面三大分支判断之前，不得跳过、不得用"直接建库"绕过。',
+        '确认前不写任何文件。用户确认后用 `/ec use <项目根>` 落定；落定之后才进入三大分支（有代码无记忆/空目录/已有记忆）。之后所有 ec_* 工具显式传该 projectRoot（勿用宿主 cwd）。',
       ].join('\n')
     }
     let state
@@ -616,6 +672,14 @@ export default class EcGate {
       `流程：阶段=${state.stage}；未过门=${pending.join(',') || '无'}；`
       + `下一岗位=${role.role ?? '(无)'}（阻塞=${role.blockedBy ?? '无'}）`,
       `缺失交接物=${missing.join(',') || '无'}；门规则见 ec_stage 工具，拍板由人确认。`,
+      // FIX-start-engineering-routing：收到「开始工程」时的两段式流程——
+      // 前置（强制）：项目根未确认时先问"是否在 <目录> 构建"并等确认（见无 projectRoot 分支）；
+      // 三大分支（在根已确认之后）：有代码无记忆库=直接建库不问；空目录/已有记忆库=才问用户下一步。
+      // 实测 session-b820e44d：目录已有贪吃蛇代码且无 .project_memory，agent 却 ask_user_question
+      // 问"从哪一步起"——正确行为应是根确认后直接建库，不拿"从哪步起"打断用户。
+      '「开始工程」路由（硬，两段式）：第一段=项目根确认（强制前置）——若还没确认项目根，必须先问用户一句「是否在 `<当前会话目录>` 进行工程构建」并等确认，用 `/ec use` 落定后才进入第二段；这段询问不可省略、不可被"直接建库"绕过。第二段=三大分支（仅在项目根已确认后按目录实际状态分流，此时"是否询问"指是否还要问"做什么/从哪步起"）：①目录里已有项目代码（存在源码/项目文件）但还没有 .project_memory/ → 不再询问，直接按下面「建库五步」严格把工程记忆目录建起来（init→通读源码→按五件套落盘→audit），建完再向用户汇报并问下一步；②目录是空的（无任何项目文件）→ 才问用户想做什么；③目录已有 .project_memory/ → 才问用户是要继续上轮、开新需求还是重建。判定"已有代码"看是否存在源码/项目文件，不要因为源码注释里提到 ADR/流程字眼就误判成"走过流程"而停下来问。',
+      // FIX-plan-sync：PLAN.md 与 state.plan 是两份，写完 md 必须同步结构化单元，否则 state.plan 永远空。
+      'PLAN 单元同步（硬）：研发岗写完 .project_memory/tmp/PLAN.md 后，必须再调 ec_stage(mode="plan", units=<单元数组>) 把单元同步进 state.plan（Web 面板与形态B并行都读这个字段；只写 md 不同步视为该岗未完成）。每个单元 {id, target, ownerFiles:[本单元独占的文件], acceptance, status, constraints:[写码前 recall 命中的记忆条目 id]}。',
       // FIX-enforce-pipeline：每轮注入六岗硬纪律——堵住"增量小功能直接改、不走完整流水线"偷懒。
       // 允许在岗位内评估后把某岗直接标完成（落交接物），但不允许跳过岗位本身。
       '流程纪律（硬）：所有代码任务必须严格走 product→architect→developer→tester→reviewer→ops 六岗位流水线，不得跳过任何岗位、不得以"小功能/增量"为由直接改代码。若某岗位经评估确不适用，也要按流程落该岗交接物把它标记为完成（ec_artifact create 落盘即登记），再由 ec_stage(mode=next-role) 推进到下一岗——岗位可以"快速完成"，不能被跳过。',

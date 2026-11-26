@@ -144,7 +144,15 @@ export default class EcGate {
   confirmG3(session, evidence) { /* 留白 */ }
 
   /**
-   * 更新交接物路径指针或 PLAN 单元状态。
+   * 落盘结构化 PLAN 单元——state.plan 的唯一新增/全量替换入口。
+   * @param {string} projectRoot 项目根
+   * @param {Array<{id:string,target?:string,ownerFiles?:string[],acceptance?:string,status?:PlanStatus,constraints?:string[]}>} units
+   * @returns {Result<EcState, EcError>} 校验 id 唯一、status∈{todo,doing,done}、ownerFiles/constraints 为字符串数组；单元数≤50
+   */
+  setPlan(projectRoot, units) { /* 留白 */ }
+
+  /**
+   * 更新交接物路径指针或 PLAN 单元状态（仅改已存在单元，不新增）。
    * @param {Session} session 会话
    * @param {{artifact?: ArtifactKey, path?: string, planId?: string, planStatus?: PlanStatus}} patch
    * @returns {Result<EcState, EcError>} 路径须落在 projectRoot 标签内（防 .. 穿越），否则 error.code=PATH_OUT_OF_ROOT
@@ -344,11 +352,13 @@ Config 保存走 `ctx.fiber.entry` + `ctx.get('configEditor').edit(entry, curren
 {
   "type": "object",
   "properties": {
-    "mode": {"type":"string","enum":["query","confirm-gate","next-role"],"default":"query",
-             "description":"query=只读状态；confirm-gate=记录人确认/证据；next-role=返回下一岗位或形态B多单元"},
+    "mode": {"type":"string","enum":["query","confirm-gate","next-role","new-task","tdd","green","verify","plan"],"default":"query",
+             "description":"query=只读状态；confirm-gate=记录人确认/证据；next-role=返回下一岗位；new-task=归档重置六岗；tdd/green=记红灯/绿灯；verify=记验证证据；plan=落盘结构化 PLAN 单元（state.plan 唯一写入口）"},
     "gate": {"type":"string","enum":["G1","G2","G3"],"description":"confirm-gate 时必填"},
     "command": {"type":"string","description":"mode=verify 及 G3 confirm-gate 时必填：本次真实运行的命令"},
     "outputDigest": {"type":"string","description":"mode=tdd/green/verify 及 G3 confirm-gate 时必填：本次真实运行的输出摘要（非全文）。G3 证据唯一契约 = command + outputDigest，与 verify 同形；不接受 evidence 字符串或 :: 分隔"},
+    "failingTest": {"type":"string","description":"mode=tdd 时必填：失败测试指针"},
+    "units": {"type":"array","description":"mode=plan 时必填：PLAN 单元数组 [{id,target,ownerFiles,acceptance,status,constraints}]，全量替换 state.plan","items":{"type":"object"}},
     "projectRoot": {"type":"string","description":"项目根路径标签（本机或远端均可，如 /remote/path/to/Project）；不做存在性/白名单校验，缺省用进程 cwd；空标签返回 INVALID_INPUT"},
     "capabilities": {"type":"object","properties":{"subagent":{"type":"boolean"}},"additionalProperties":false,"description":"形态B能力门，默认开启"},
     "thresholds": {"type":"object","properties":{"minFilesForParallel":{"type":"integer"}},"additionalProperties":false,"description":"形态B收益门，最小并行单元数，默认2"}
@@ -435,6 +445,7 @@ Config 保存走 `ctx.fiber.entry` + `ctx.get('configEditor').edit(entry, curren
 | `/ec status` | 显示当前阶段 / 三门状态 / 在岗岗位 | 简表 + 缺失交接物指针 |
 | `/ec next` | 返回下一应启动岗位（形态 A 单岗位 / 形态 B 研发岗多单元） | `{role, ready, blockedBy, mode?, parallelRoles}` |
 | `/ec gate <G1\|G2\|G3>` | 触发门确认（G1/G2 需人确认上下文；G3 须带 `--cmd "命令" --out "输出摘要"`，与 verify 同形） | 成功/失败 + code |
+| `/ec plan --units '<JSON数组>'` | 落盘结构化 PLAN 单元（state.plan 唯一写入口；写完 PLAN.md 必须调此同步） | `{ok, plan, stage}` |
 | `/ec metrics [limit]` | 回看 GATE-LOG | bounded 记录列表 |
 | `/ec memory <init\|write\|query\|recall> …` | 转发 memory 能力（与工具同语义；`recall <线索>` 检索套用，`--file=` 对应 file；无 `--loose`/strict 开关，写入一律强制五件套） | 路径指针 / excerpt / recall hits |
 
