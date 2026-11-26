@@ -68,12 +68,12 @@ export function runEcCommand(line, projectRoot, opts = {}) {
       const r = ecGate.resetForNewTask(root)
       return r.ok ? { ok: true, command: 'new-task', archived: r.value.archived, stage: r.value.state.stage, state: r.value.state } : r
     }
+    // 纪律落地：红灯/绿灯/验证/G3 证据共用 --test/--cmd/--out 旗标（与 ec_stage 同形）。
+    const flag = (name) => {
+      const i = rest.findIndex((a) => a === `--${name}`)
+      return i >= 0 ? rest[i + 1] : undefined
+    }
     if (sub === 'tdd' || sub === 'green' || sub === 'verify') {
-      // 纪律落地：红灯/绿灯/验证证据的 /ec 快捷入口（与 ec_stage mode 同源）。
-      const flag = (name) => {
-        const i = rest.findIndex((a) => a === `--${name}`)
-        return i >= 0 ? rest[i + 1] : undefined
-      }
       let r
       if (sub === 'tdd') r = ecGate.recordTdd(root, { failingTest: flag('test'), outputDigest: flag('out') })
       else if (sub === 'green') r = ecGate.recordGreen(root, { outputDigest: flag('out') })
@@ -83,14 +83,13 @@ export function runEcCommand(line, projectRoot, opts = {}) {
     if (sub === 'gate') {
       const gate = (rest[0] ?? '').toUpperCase()
       if (!['G1', 'G2', 'G3'].includes(gate)) {
-        return { ok: false, error: ecError('INVALID_INPUT', '用法：/ec gate <G1|G2|G3> [evidence]') }
+        return { ok: false, error: ecError('INVALID_INPUT', '用法：/ec gate <G1|G2|G3>（G3 须带 --cmd "命令" --out "输出摘要"，与 verify 同形）') }
       }
       if (gate === 'G3') {
-        const evidence = rest.slice(1).filter((a) => !a.startsWith('--')).join(' ')
-        const sep = evidence.indexOf('::')
+        // G3 证据唯一契约：--cmd + --out，与 verify / ec_stage / HTTP 层同形。不接受 :: 字符串。
         const r = ecGate.confirmG3(root, {
-          command: (sep >= 0 ? evidence.slice(0, sep) : evidence).trim(),
-          outputDigest: (sep >= 0 ? evidence.slice(sep + 2) : '').trim(),
+          command: flag('cmd'),
+          outputDigest: flag('out'),
         })
         return r.ok ? { ok: true, command: 'gate', ...r.value } : r
       }
@@ -176,7 +175,7 @@ export function registerEcCommand(ctx) {
   try {
     const dispose = commands.register({
       name: '/ec',
-      description: '工程套件统一入口：use / which / status / next / new-task / tdd / green / verify / gate / metrics / memory（tdd=记红灯 --test X --out Y；verify=记验证 --cmd "..." --out "..."；memory 支持 init/write/query/recall/audit/patch）',
+      description: '工程套件统一入口：use / which / status / next / new-task / tdd / green / verify / gate / metrics / memory（tdd=记红灯 --test X --out Y；verify=记验证 --cmd "..." --out "..."；gate G3=过证据门 --cmd "..." --out "..."（与 verify 同形）；memory 支持 init/write/query/recall/audit/patch）',
       async execute(agent, line) {
         // runEcCommand 自身不抛（内部 try/catch）；这里仅兜底未预期的注册层异常。
         return runEcCommand(line)

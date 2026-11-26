@@ -625,14 +625,18 @@ describe('FIX-2 归一化分隔符 + audit 假阴性堵漏', () => {
     const r = validateMemoryEntry('[FACT E-03] 注册表分两类。\n  证据: a.py:1; b.py:2 / \n  记录: 2026-11-25 · 实测')
     assert.ok(r.warnings.some((w) => w.rule === 'evidence-no-pattern'), JSON.stringify(r.warnings))
   })
-  test('audit 报告全文无五件套 header 的规范文件', () => {
+  test('audit 不因根文件（INDEX/status/open-questions）散文报 no-five-part-entries（与 write 自由格式同口径）', () => {
     const root = freshRoot()
     memoryAction({ action: 'init', projectRoot: root })
-    // 用 tmp 自由文本直接落一篇散文式 open-questions（模拟 agent 跳过五件套）
+    // 三个根文件按设计是自由格式（导航/快照/清单），agent 写散文进去是合规的，
+    // audit 不得报 no-five-part-entries（旧逻辑只豁免"内容=初始模板"的桩，写入真实内容就误报——实测 snake 会话）。
     const prose = '# 未决问题\n\n- **BUG-01** x · 实测 · 待复核\n  - 位置 a.py:1\n'
-    writeFileSync(join(root, MEMORY_DIR_NAME, 'open-questions.md'), prose, 'utf8')
+    for (const f of ['INDEX.md', 'status.md', 'open-questions.md']) {
+      writeFileSync(join(root, MEMORY_DIR_NAME, f), prose, 'utf8')
+    }
     const r = memoryAction({ action: 'audit', projectRoot: root })
-    assert.ok(r.warnings.some((w) => w.file === 'open-questions.md' && w.rule === 'no-five-part-entries'), JSON.stringify(r.warnings))
+    const rootWarnings = r.warnings.filter((w) => w.rule === 'no-five-part-entries' && /^(INDEX|status|open-questions)\.md$/.test(w.file))
+    assert.equal(rootWarnings.length, 0, `根文件不该报 no-five-part-entries：${JSON.stringify(rootWarnings)}`)
   })
 
   // FIX-audit-stub-exempt：init 的 6 个 overview 桩只有边界声明、无 [KIND ID]，
@@ -794,12 +798,17 @@ describe('AUDIT-FIX 模块接缝与边界条件回归', () => {
     assert.equal(p.ok, false, '幽灵 id 不该能 patch')
   })
 
-  // M1/S2：init 桩全豁免，但写进桩的散文照常报
-  test('audit：init 的 3 根文件+6 overview 桩零扣分；桩里写散文仍报 no-five-part-entries', () => {
+  // M1/S2 + BUG2：init 桩全豁免；根文件写散文仍豁免（自由格式），但职责目录 overview 桩写散文照常报
+  test('audit：init 桩零扣分；根文件散文豁免；职责目录 overview 桩写散文仍报 no-five-part-entries', () => {
     const root = freshRoot()
     memoryAction({ action: 'init', projectRoot: root })
     const a = memoryAction({ action: 'audit', projectRoot: root })
     assert.equal(a.warnings.filter((w) => w.rule === 'no-five-part-entries').length, 0, JSON.stringify(a.warnings))
+    // 根文件写散文：无条件豁免（无兼容，不再看 isInitStub）
+    writeFileSync(join(root, MEMORY_DIR_NAME, 'INDEX.md'), '# 导航\n\n- 随便写点自由文本\n', 'utf8')
+    const aRoot = memoryAction({ action: 'audit', projectRoot: root })
+    assert.ok(!aRoot.warnings.some((w) => w.file === 'INDEX.md' && w.rule === 'no-five-part-entries'), JSON.stringify(aRoot.warnings))
+    // 职责目录 overview 桩写散文：内容已变，照常报
     writeFileSync(join(root, MEMORY_DIR_NAME, 'conventions', 'overview.md'), '# 风格\n\n- 命名用 TT 前缀\n', 'utf8')
     const a2 = memoryAction({ action: 'audit', projectRoot: root })
     assert.ok(a2.warnings.some((w) => w.file === 'conventions/overview.md' && w.rule === 'no-five-part-entries'), JSON.stringify(a2.warnings))

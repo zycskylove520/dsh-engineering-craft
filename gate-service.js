@@ -482,7 +482,7 @@ export default class EcGate {
   confirmG3(projectRoot, evidence) {
     if (!evidence || typeof evidence.command !== 'string' || !evidence.command.trim()
       || typeof evidence.outputDigest !== 'string' || !evidence.outputDigest.trim()) {
-      return fail(ecError('NO_EVIDENCE', 'G3 须提供 command 与 outputDigest', { gate: 'G3' }))
+      return fail(ecError('NO_EVIDENCE', 'G3 须提供 command 与 outputDigest（与 verify 同形；不接受 evidence 字符串或 :: 分隔）', { gate: 'G3' }))
     }
     const state = this.read(projectRoot)
     // 门序：G3 须在 G2 之后确认。

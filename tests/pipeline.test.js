@@ -124,9 +124,9 @@ describe('交接物落盘 → 门放行 集成链路（产物落 tmp/）', () =>
     assert.ok(afterAgain.pipeline.handoffs.product, '重登记 architect 不应抹掉 product')
   })
 
-  test('G3 工具链路：空 evidence 拒绝；过 G1/G2 后带 evidence 成功且 stage→testing', async () => {
+  test('G3 工具链路：证据须 command+outputDigest（不接受 evidence 字符串）；过 G1/G2 后成功且 stage→testing', async () => {
     const root = freshRoot()
-    // 空 evidence → NO_EVIDENCE（工具层显式校验）
+    // 空证据 → NO_EVIDENCE（工具层显式校验）
     const empty = await byName.ec_stage.execute({ mode: 'confirm-gate', gate: 'G3', projectRoot: root })
     assert.equal(empty.ok, false)
     assert.equal(empty.error.code, 'NO_EVIDENCE')
@@ -140,23 +140,29 @@ describe('交接物落盘 → 门放行 集成链路（产物落 tmp/）', () =>
     const g2 = await byName.ec_stage.execute({ mode: 'confirm-gate', gate: 'G2', userConfirmed: true, projectRoot: root })
     assert.equal(g2.ok, true, JSON.stringify(g2.error))
 
+    // 唯一契约：只给 evidence 字符串（旧格式）一律拒；必须 command + outputDigest。无兼容。
+    const badShape = await byName.ec_stage.execute({ mode: 'confirm-gate', gate: 'G3', evidence: 'x::y', projectRoot: root })
+    assert.equal(badShape.ok, false)
+    assert.equal(badShape.error.code, 'NO_EVIDENCE')
+
     // FUSION：G3 前必须先记 TDD 红灯 + 至少一条验证证据（机械门）
-    const noTdd = await byName.ec_stage.execute({ mode: 'confirm-gate', gate: 'G3', evidence: 'x::y', projectRoot: root })
+    const noTdd = await byName.ec_stage.execute({ mode: 'confirm-gate', gate: 'G3', command: 'x', outputDigest: 'y', projectRoot: root })
     assert.equal(noTdd.ok, false)
     assert.equal(noTdd.error.code, 'TDD_RED_MISSING')
     const tdd = await byName.ec_stage.execute({ mode: 'tdd', failingTest: 'test/x.test.js::should fail', outputDigest: '1 failed', projectRoot: root })
     assert.equal(tdd.ok, true, JSON.stringify(tdd.error))
-    const noVerify = await byName.ec_stage.execute({ mode: 'confirm-gate', gate: 'G3', evidence: 'x::y', projectRoot: root })
+    const noVerify = await byName.ec_stage.execute({ mode: 'confirm-gate', gate: 'G3', command: 'x', outputDigest: 'y', projectRoot: root })
     assert.equal(noVerify.ok, false)
     assert.equal(noVerify.error.code, 'VERIFY_MISSING')
     const ver = await byName.ec_stage.execute({ mode: 'verify', command: 'node --check memory.js', outputDigest: 'exit 0', projectRoot: root })
     assert.equal(ver.ok, true, JSON.stringify(ver.error))
-    // G3 带证据过门
+    // G3 带证据过门：command + outputDigest，与 verify 同形
     const g3 = await byName.ec_stage.execute({
-      mode: 'confirm-gate', gate: 'G3', evidence: 'node --check memory.js::exit 0', projectRoot: root,
+      mode: 'confirm-gate', gate: 'G3', command: 'node --check memory.js', outputDigest: 'exit 0', projectRoot: root,
     })
     assert.equal(g3.ok, true, JSON.stringify(g3.error))
     assert.equal(g3.stage, 'testing')
     assert.equal(g3.gates.G3.passed, true)
+    assert.equal(g3.gates.G3.evidence, 'node --check memory.js :: exit 0')
   })
 })

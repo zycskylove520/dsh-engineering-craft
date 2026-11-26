@@ -40,13 +40,13 @@ export const ecStageTool = {
     properties: {
       mode: {
         type: 'string', enum: ['query', 'confirm-gate', 'next-role', 'new-task', 'tdd', 'green', 'verify'], default: 'query',
-        description: 'query=只读状态；confirm-gate=记录人确认/证据；next-role=返回下一岗位；new-task=归档旧 state 并重置（工程记忆不动）；tdd=记录 TDD 红灯（failingTest 必填，写生产代码前先有失败测试）；green=记录测试转绿；verify=记录一条验证证据（command+outputDigest，宣称完成前必须先跑并落证据）。识别到新需求先 new-task，再严格走六岗，开发岗必须先 tdd 再写代码',
+        description: 'query=只读状态；confirm-gate=记录人确认/证据（G3 须同时给 command+outputDigest，与 verify 同形）；next-role=返回下一岗位；new-task=归档旧 state 并重置（工程记忆不动）；tdd=记录 TDD 红灯（failingTest 必填，写生产代码前先有失败测试）；green=记录测试转绿；verify=记录一条验证证据（command+outputDigest，宣称完成前必须先跑并落证据）。识别到新需求先 new-task，再严格走六岗，开发岗必须先 tdd 再写代码',
       },
       gate: { type: 'string', enum: ['G1', 'G2', 'G3'], description: 'confirm-gate 时必填' },
-      evidence: { type: 'string', description: 'G3 confirm-gate 时必填：命令+输出摘要（非全文）' },
+      command: { type: 'string', description: 'mode=verify 及 G3 confirm-gate 时必填：本次真实运行的命令（G3 证据 = command + outputDigest，与 verify 完全一致）' },
       userConfirmed: { type: 'boolean', description: 'G1/G2 confirm-gate 时必填：确认卡由人点过才置 true，agent 不得自报' },
       failingTest: { type: 'string', description: 'mode=tdd 时必填：失败测试文件/用例指针（红灯证据）' },
-      outputDigest: { type: 'string', description: 'mode=tdd/green/verify 时：本次真实运行的命令输出摘要（非全文）' },
+      outputDigest: { type: 'string', description: 'mode=tdd/green/verify 及 G3 confirm-gate 时必填：本次真实运行的命令输出摘要（非全文）' },
       capabilities: {
         type: 'object',
         properties: { subagent: { type: 'boolean', description: '能力门：false 关闭研发岗形态 B，退回形态 A 顺序岗位' } },
@@ -91,20 +91,20 @@ export const ecStageTool = {
         return r.ok ? { ok: true, mode, tdd: r.value.tdd, stage: r.value.stage } : r
       }
       if (mode === 'verify') {
-        const r = ecGate.recordVerify(root, { command: args.command ?? args.evidence, outputDigest: args.outputDigest })
+        const r = ecGate.recordVerify(root, { command: args.command, outputDigest: args.outputDigest })
         return r.ok ? { ok: true, mode, checks: r.value.verification.checks.length, stage: r.value.stage } : r
       }
       if (mode === 'confirm-gate') {
         if (!args.gate) return { ok: false, error: ecError('INVALID_INPUT', 'confirm-gate 须指定 gate', {}) }
         // G1/G2 只由人拍板：工具调用者须显式声明 userConfirmed；G3 走证据路径。
+        // G3 证据唯一契约：command + outputDigest，与 verify / confirmG3 / HTTP 层完全同形。
+        // 不接受 evidence 字符串或 :: 分隔符——没有兼容包袱，格式从 schema 一眼可见。
         if (args.gate === 'G3') {
-          const input = String(args.evidence ?? '').trim()
-          if (!input) {
-            return { ok: false, error: ecError('NO_EVIDENCE', 'G3 confirm-gate 须提供 evidence（命令::输出摘要）', { gate: 'G3' }) }
+          const command = String(args.command ?? '').trim()
+          const outputDigest = String(args.outputDigest ?? '').trim()
+          if (!command || !outputDigest) {
+            return { ok: false, error: ecError('NO_EVIDENCE', 'G3 confirm-gate 须同时提供 command 与 outputDigest（与 verify 同形；不接受 evidence 字符串）', { gate: 'G3' }) }
           }
-          const sep = input.indexOf('::')
-          const command = (sep >= 0 ? input.slice(0, sep) : input).trim()
-          const outputDigest = (sep >= 0 ? input.slice(sep + 2) : '').trim()
           const r = ecGate.confirmG3(root, { command, outputDigest })
           return r.ok ? { ok: true, ...r.value } : r
         }

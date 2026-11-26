@@ -687,11 +687,14 @@ export function memoryAction(args) {
       }
       // 规范层文件若一个五件套 header 都没有（如把 OPEN 写成 **BUG-01** 散文列表），
       // 它就不进 recall、不进五件套校验、也不进统计——这是 audit 曾经的假阴性来源。
-      // 例外：init 生成的原始桩（3 根文件 + 6 个职责目录 overview.md）按设计不放条目，
-      // 若对它们报 no-five-part-entries，初建库就被自己造的桩扣 64 分（20 分挂掉）。
-      // 但 isInitStub 严格比对模板全文：agent 写进这些文件的散文（内容已变）仍照常报——堵住 S2 假阴性。
+      // 例外一：3 个根文件（INDEX/status/open-questions）按设计是自由格式（导航/快照/清单），
+      //   write 层已免五件套（isFreeFormatLayer），audit 必须同口径——否则 agent 按文档写好的
+      //   根文件被 audit 误报 no-five-part-entries 每条扣 8 分（实测 snake 会话质量分被压 82→84）。
+      //   无兼容：根文件无条件豁免，不再看 isInitStub（旧逻辑只豁免"内容=初始模板"的桩）。
+      // 例外二：init 生成的职责目录 overview.md 原始桩按设计不放条目，isInitStub 严格比对模板全文；
+      //   agent 写进 overview.md 的散文（内容已变）仍照常报——堵住 S2 假阴性。
       const entriesInFile = splitEntries(text.split('\n')).filter((e) => e.id)
-      if (!rel.startsWith('tmp/') && !isInitStub(rel, text)
+      if (!rel.startsWith('tmp/') && !ROOT_FILES.includes(rel) && !isInitStub(rel, text)
           && entriesInFile.length === 0 && /^\s*#\s/m.test(text)) {
         warnings.push({ file: rel, rule: 'no-five-part-entries', hint: '全文无 [KIND ID] 条目：无法被 recall 检索、也不受五件套校验，改用规范格式' })
       }
