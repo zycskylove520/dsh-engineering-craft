@@ -294,6 +294,50 @@ export default class EcGate {
   }
 
   /**
+   * 开新任务：把当前 state 归档到 .ec-state/history/，再把主 state 重置为初始态。
+   * 工程记忆（.project_memory/）与 activeRoot 不动——换的是"本次任务的流程状态"，
+   * 不是项目本身。归档保证误判也能恢复（history 内按时间戳命名，永不覆盖）。
+   * @param {string} projectRoot 项目根
+   * @returns {{ok:true, value:{archived:string, state:object}}|{ok:false, error:object}} Result
+   */
+  resetForNewTask(projectRoot) {
+    try {
+      const root = normalizeProjectRoot(projectRoot)
+      if (!root) return fail(ecError('INVALID_INPUT', 'projectRoot 是空标签', { projectRoot }))
+      const dir = joinFor(root, STATE_DIR_NAME)
+      const file = statePathOf(root)
+      let archived = null
+      if (existsSync(file)) {
+        const text = readFileSync(file, 'utf8')
+        // 归档前校验：坏 state 不归档成垃圾，但仍允许重置（返回错误让上层决定是否修）。
+        try { JSON.parse(text) } catch {
+          return fail(ecError('STORAGE_UNAVAILABLE', `state.json 解析失败，无法归档：${file}`, { file }))
+        }
+        const historyDir = joinFor(dir, 'history')
+        mkdirSync(historyDir, { recursive: true })
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+        archived = joinFor(historyDir, `state-${stamp}.json`)
+        writeFileSync(archived, text, 'utf8')
+      }
+      const fresh = initialState(root)
+      this.write(fresh, root)
+      return ok({ archived, state: fresh })
+    } catch (e) {
+      return fail(ecError('STORAGE_UNAVAILABLE', `开新任务重置失败：${e?.message ?? e}`, {}))
+    }
+  }
+
+  /**
+   * 六岗是否已全部完成（判断"是否该开新任务"）：所有交接物路径非空。
+   * @param {object} state EcState
+   * @returns {boolean}
+   */
+  static allRolesComplete(state) {
+    const artifacts = state?.artifacts ?? {}
+    return Object.values(artifacts).every((v) => Boolean(v))
+  }
+
+  /**
    * 校验门是否满足放行条件（封装 rules.checkGate，规则来自 Config）。
    * @param {string} projectRoot 项目根
    * @param {string} gateId G1|G2|G3
@@ -478,12 +522,22 @@ export default class EcGate {
       thresholds: { ...roleDefaults.thresholds },
     })
     const missing = Object.entries(state.artifacts).filter(([, v]) => !v).map(([k]) => k)
+    const allComplete = EcGate.allRolesComplete(state)
     const lines = [
       `工程套件：已确认项目根=${projectRoot}`,
       `流程：阶段=${state.stage}；未过门=${pending.join(',') || '无'}；`
       + `下一岗位=${role.role ?? '(无)'}（阻塞=${role.blockedBy ?? '无'}）`,
       `缺失交接物=${missing.join(',') || '无'}；门规则见 ec_stage 工具，拍板由人确认。`,
+      // FIX-enforce-pipeline：每轮注入六岗硬纪律——堵住"增量小功能直接改、不走完整流水线"偷懒。
+      // 允许在岗位内评估后把某岗直接标完成（落交接物），但不允许跳过岗位本身。
+      '流程纪律（硬）：所有代码任务必须严格走 product→architect→developer→tester→reviewer→ops 六岗位流水线，不得跳过任何岗位、不得以"小功能/增量"为由直接改代码。若某岗位经评估确不适用，也要按流程落该岗交接物把它标记为完成（ec_artifact create 落盘即登记），再由 ec_stage(mode=next-role) 推进到下一岗——岗位可以"快速完成"，不能被跳过。',
     ]
+    if (allComplete) {
+      // FIX-new-task-aware：六岗全完成时，提示 agent 识别新需求要主动重置（用户不会每次说"开始工程"）。
+      // agent 看到本轮用户提的是新需求（而非对上一任务的追问/收尾）时，先调 ec_stage(mode='new-task')
+      // 归档旧状态并重置，再从 product 岗重新走六岗；不要复用上一需求的全完成状态直接开工。
+      lines.push('当前六岗位已全部完成（上一需求已交付）。若用户本轮提出的是**新需求**（不是对上一需求的追问或收尾），先主动调 `ec_stage(mode="new-task")`（或 `/ec new-task`）归档旧状态并重置六岗，再从 product 岗重新走完整流水线；工程记忆与已确认项目根保持不变。旧状态可在 .ec-state/history/ 找回。')
+    }
     // P1-2：仅当记忆库「尚无实质内容」时注入建库指令，避免每轮代码任务塞建库噪音。
     // 字面量而非 import memory.js（memory.js 已 import gate-service，避免 ESM 环）。
     // BUG-fix(lazy-init)：此前用 existsSync(memDir) 判断——init 建完空骨架目录就存在，

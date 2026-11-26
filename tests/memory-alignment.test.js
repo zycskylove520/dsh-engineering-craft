@@ -919,3 +919,58 @@ describe('AUDIT-FIX 模块接缝与边界条件回归', () => {
     assert.ok(r.hits.some((h) => h.id === 'R-DI-01'), JSON.stringify(r.hits))
   })
 })
+
+// ========== 新任务生命周期 + 六岗硬纪律回归 ==========
+describe('NEW-TASK 新需求主动重置 + 六岗位硬纪律', () => {
+  const completedState = (root) => {
+    const g = new EcGate()
+    const s = g.read(root)
+    for (const k of Object.keys(s.artifacts)) s.artifacts[k] = join(root, '.project_memory', 'tmp', `${k}.md`)
+    s.stage = 'delivery'
+    for (const gate of ['G1', 'G2', 'G3']) s.gates[gate] = { ...s.gates[gate], passed: true, at: 1 }
+    mkdirSync(join(root, STATE_DIR_NAME), { recursive: true })
+    writeFileSync(statePathOf(root), JSON.stringify(s), 'utf8')
+    return s
+  }
+
+  test('resetForNewTask：归档旧 state 到 history，主 state 回到初始态，保留工程记忆', () => {
+    const root = freshRoot()
+    const g = new EcGate()
+    completedState(root)
+    mkdirSync(join(root, MEMORY_DIR_NAME, 'conventions'), { recursive: true })
+    writeFileSync(join(root, MEMORY_DIR_NAME, 'conventions', 'style.md'), 'keep', 'utf8')
+    const r = g.resetForNewTask(root)
+    assert.equal(r.ok, true, JSON.stringify(r.error))
+    assert.ok(r.value.archived && existsSync(r.value.archived), '旧 state 应归档')
+    assert.equal(g.read(root).stage, 'requirements', '主 state 应重置到 requirements')
+    assert.ok(Object.values(g.read(root).artifacts).every((v) => !v), '交接物应清空')
+    assert.ok(existsSync(join(root, MEMORY_DIR_NAME, 'conventions', 'style.md')), '工程记忆不得被重置')
+    assert.ok(existsSync(join(root, STATE_DIR_NAME, 'history')), 'history 目录应存在')
+  })
+
+  test('ec_stage new-task 模式 + /ec new-task 暴露重置入口', async () => {
+    const root = freshRoot()
+    completedState(root)
+    const tool = ECO_TOOLS.find((t) => t.name === 'ec_stage')
+    assert.ok(tool.parameters.properties.mode.enum.includes('new-task'), 'schema 应含 new-task')
+    const r = await tool.execute({ mode: 'new-task', projectRoot: root })
+    assert.equal(r.ok, true, JSON.stringify(r.error))
+    assert.equal(r.stage, 'requirements')
+    const c = runEcCommand('/ec new-task', root)
+    assert.equal(c.ok, true, JSON.stringify(c.error))
+  })
+
+  test('promptSection：六岗硬纪律每轮注入；全完成时提示新需求先重置', () => {
+    const root = freshRoot()
+    memoryAction({ action: 'init', projectRoot: root })
+    const p1 = ecGate.promptSection(root)
+    assert.match(p1, /严格走 product→architect→developer→tester→reviewer→ops 六岗位流水线/, '六岗硬纪律须每轮注入')
+    assert.match(p1, /小功能/, '须堵住小功能跳过话术')
+    assert.match(p1, /落该岗交接物把它标记为完成/, '须允许岗位快速完成但不可跳过')
+    assert.ok(!p1.includes('六岗位已全部完成'), '未完成时不该提示重置')
+    completedState(root)
+    const p2 = ecGate.promptSection(root)
+    assert.match(p2, /六岗位已全部完成/, '全完成时须提示')
+    assert.match(p2, /new-task/, '须提示 agent 主动重置')
+  })
+})

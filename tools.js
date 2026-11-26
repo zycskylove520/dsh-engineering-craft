@@ -34,13 +34,13 @@ const CANCELLED = () => ({ ok: false, error: ecError('INVALID_INPUT', '工具执
  */
 export const ecStageTool = {
   name: 'ec_stage',
-  description: '查询当前工程阶段与门状态、尝试过门、或取下一个应启动的岗位；门未过时拒绝进入下游动作。',
+  description: '查询当前工程阶段与门状态、尝试过门、取下一个应启动的岗位，或开新任务（重置六岗状态）；门未过时拒绝进入下游动作。识别到用户提出新需求时，先调 mode=new-task 归档旧状态并重置，再严格按六岗位流水线推进——不允许跳过任何岗位，小任务也要逐岗走完（可在岗位内评估后直接把该岗交接物标记为完成）。',
   parameters: {
     type: 'object',
     properties: {
       mode: {
-        type: 'string', enum: ['query', 'confirm-gate', 'next-role'], default: 'query',
-        description: 'query=只读状态；confirm-gate=记录人确认/证据；next-role=返回下一岗位',
+        type: 'string', enum: ['query', 'confirm-gate', 'next-role', 'new-task'], default: 'query',
+        description: 'query=只读状态；confirm-gate=记录人确认/证据；next-role=返回下一岗位；new-task=归档旧 state 并把六岗位/门/交接物重置为初始态（工程记忆不动）。识别到新需求时先调它，再走六岗',
       },
       gate: { type: 'string', enum: ['G1', 'G2', 'G3'], description: 'confirm-gate 时必填' },
       evidence: { type: 'string', description: 'G3 confirm-gate 时必填：命令+输出摘要（非全文）' },
@@ -72,6 +72,11 @@ export const ecStageTool = {
     try {
       const mode = args.mode ?? 'query'
       const roleOpts = { capabilities: args.capabilities, thresholds: args.thresholds }
+      if (mode === 'new-task') {
+        const r = ecGate.resetForNewTask(root)
+        // 扁平化 stage 与 query 模式响应一致，同时带完整 state 与归档路径供追溯。
+        return r.ok ? { ok: true, archived: r.value.archived, stage: r.value.state.stage, state: r.value.state } : r
+      }
       if (mode === 'next-role') {
         const role = ecGate.nextRole(root, roleOpts)
         return { ok: true, ...role }

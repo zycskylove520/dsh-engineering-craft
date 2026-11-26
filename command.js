@@ -63,6 +63,11 @@ export function runEcCommand(line, projectRoot, opts = {}) {
         mode: role.mode ?? 'A', parallelRoles: role.roles ?? [], ready: Boolean(role.role),
       }
     }
+    if (sub === 'new-task') {
+      // 识别到新需求时由 agent 主动调用：归档旧 state + 重置六岗；工程记忆不动。
+      const r = ecGate.resetForNewTask(root)
+      return r.ok ? { ok: true, command: 'new-task', archived: r.value.archived, stage: r.value.state.stage, state: r.value.state } : r
+    }
     if (sub === 'gate') {
       const gate = (rest[0] ?? '').toUpperCase()
       if (!['G1', 'G2', 'G3'].includes(gate)) {
@@ -159,7 +164,7 @@ export function registerEcCommand(ctx) {
   try {
     const dispose = commands.register({
       name: '/ec',
-      description: '工程套件统一入口：use / which / status / next / gate / metrics / memory（memory 支持 init/write/query/recall/audit/patch）',
+      description: '工程套件统一入口：use / which / status / next / new-task / gate / metrics / memory（new-task=新需求时主动重置六岗；memory 支持 init/write/query/recall/audit/patch）',
       async execute(agent, line) {
         // runEcCommand 自身不抛（内部 try/catch）；这里仅兜底未预期的注册层异常。
         return runEcCommand(line)
