@@ -68,6 +68,18 @@ export function runEcCommand(line, projectRoot, opts = {}) {
       const r = ecGate.resetForNewTask(root)
       return r.ok ? { ok: true, command: 'new-task', archived: r.value.archived, stage: r.value.state.stage, state: r.value.state } : r
     }
+    if (sub === 'tdd' || sub === 'green' || sub === 'verify') {
+      // 纪律落地：红灯/绿灯/验证证据的 /ec 快捷入口（与 ec_stage mode 同源）。
+      const flag = (name) => {
+        const i = rest.findIndex((a) => a === `--${name}`)
+        return i >= 0 ? rest[i + 1] : undefined
+      }
+      let r
+      if (sub === 'tdd') r = ecGate.recordTdd(root, { failingTest: flag('test'), outputDigest: flag('out') })
+      else if (sub === 'green') r = ecGate.recordGreen(root, { outputDigest: flag('out') })
+      else r = ecGate.recordVerify(root, { command: flag('cmd'), outputDigest: flag('out') })
+      return r.ok ? { ok: true, command: sub, stage: r.value.stage } : r
+    }
     if (sub === 'gate') {
       const gate = (rest[0] ?? '').toUpperCase()
       if (!['G1', 'G2', 'G3'].includes(gate)) {
@@ -164,7 +176,7 @@ export function registerEcCommand(ctx) {
   try {
     const dispose = commands.register({
       name: '/ec',
-      description: '工程套件统一入口：use / which / status / next / new-task / gate / metrics / memory（new-task=新需求时主动重置六岗；memory 支持 init/write/query/recall/audit/patch）',
+      description: '工程套件统一入口：use / which / status / next / new-task / tdd / green / verify / gate / metrics / memory（tdd=记红灯 --test X --out Y；verify=记验证 --cmd "..." --out "..."；memory 支持 init/write/query/recall/audit/patch）',
       async execute(agent, line) {
         // runEcCommand 自身不抛（内部 try/catch）；这里仅兜底未预期的注册层异常。
         return runEcCommand(line)

@@ -140,6 +140,17 @@ describe('交接物落盘 → 门放行 集成链路（产物落 tmp/）', () =>
     const g2 = await byName.ec_stage.execute({ mode: 'confirm-gate', gate: 'G2', userConfirmed: true, projectRoot: root })
     assert.equal(g2.ok, true, JSON.stringify(g2.error))
 
+    // FUSION：G3 前必须先记 TDD 红灯 + 至少一条验证证据（机械门）
+    const noTdd = await byName.ec_stage.execute({ mode: 'confirm-gate', gate: 'G3', evidence: 'x::y', projectRoot: root })
+    assert.equal(noTdd.ok, false)
+    assert.equal(noTdd.error.code, 'TDD_RED_MISSING')
+    const tdd = await byName.ec_stage.execute({ mode: 'tdd', failingTest: 'test/x.test.js::should fail', outputDigest: '1 failed', projectRoot: root })
+    assert.equal(tdd.ok, true, JSON.stringify(tdd.error))
+    const noVerify = await byName.ec_stage.execute({ mode: 'confirm-gate', gate: 'G3', evidence: 'x::y', projectRoot: root })
+    assert.equal(noVerify.ok, false)
+    assert.equal(noVerify.error.code, 'VERIFY_MISSING')
+    const ver = await byName.ec_stage.execute({ mode: 'verify', command: 'node --check memory.js', outputDigest: 'exit 0', projectRoot: root })
+    assert.equal(ver.ok, true, JSON.stringify(ver.error))
     // G3 带证据过门
     const g3 = await byName.ec_stage.execute({
       mode: 'confirm-gate', gate: 'G3', evidence: 'node --check memory.js::exit 0', projectRoot: root,

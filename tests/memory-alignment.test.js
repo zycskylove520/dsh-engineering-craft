@@ -861,8 +861,8 @@ describe('AUDIT-FIX 模块接缝与边界条件回归', () => {
     assert.equal(g.gates.G1.requireEvidence, true)
   })
 
-  // A2：state v2 残缺字段自愈（不抛裸 TypeError），非法 stage 被拒
-  test('state v2 缺 metrics/pipeline → read 自愈；stage=bogus → 领域错误', () => {
+  // A2（无兼容）：state v2 残缺字段一律报错，不补齐、不迁移；非法 stage 同样拒绝
+  test('state v2 缺任何字段 → read 报领域错误（不自愈）；stage=bogus → 领域错误', () => {
     const root = freshRoot()
     const g = new EcGate()
     const state = g.read(root)
@@ -872,12 +872,13 @@ describe('AUDIT-FIX 模块接缝与边界条件回归', () => {
     const dir = join(root, STATE_DIR_NAME)
     mkdirSync(dir, { recursive: true })
     writeFileSync(statePathOf(root), JSON.stringify(broken), 'utf8')
-    const healed = g.read(root)
-    assert.ok(healed.metrics && healed.pipeline, '缺字段应内存自愈，不崩')
-    // confirmGate 不再抛裸 TypeError
-    writeFileSync(statePathOf(root), JSON.stringify({ ...broken, artifacts: { ...broken.artifacts, prd: '/p' } }), 'utf8')
-    const r = g.confirmGate(root, 'G1', {})
-    assert.equal(r.ok, true, JSON.stringify(r.error))
+    assert.throws(() => g.read(root), (e) => e.code === 'STORAGE_UNAVAILABLE' && /字段缺失/.test(e.message))
+    // 缺 tdd/verification 也报错
+    const noDiscipline = { ...state }
+    delete noDiscipline.tdd
+    delete noDiscipline.verification
+    writeFileSync(statePathOf(root), JSON.stringify(noDiscipline), 'utf8')
+    assert.throws(() => g.read(root), (e) => e.code === 'STORAGE_UNAVAILABLE' && /字段缺失/.test(e.message))
     const bogus = { ...state, stage: 'bogus' }
     writeFileSync(statePathOf(root), JSON.stringify(bogus), 'utf8')
     assert.throws(() => g.read(root), (e) => e.code === 'STORAGE_UNAVAILABLE' && /stage/.test(e.message))
@@ -958,6 +959,76 @@ describe('NEW-TASK 新需求主动重置 + 六岗位硬纪律', () => {
     assert.equal(r.stage, 'requirements')
     const c = runEcCommand('/ec new-task', root)
     assert.equal(c.ok, true, JSON.stringify(c.error))
+  })
+
+  // 无兼容：完全没有 tdd/verification 字段的裸 state 也被拦（不因旧形状放行）
+  test('无兼容：state 缺 tdd/verification 字段时 G3 一律拦，不给旧状态开口子', () => {
+    const naked = {
+      gates: { G3: { passed: true, evidence: 'cmd::out', at: 1 } },
+      artifacts: {},
+      // 故意不放 tdd / verification
+    }
+    const rule = { requiredArtifacts: [], requireUserConfirm: false, requireEvidence: true }
+    const r = checkGate('G3', naked, rule)
+    assert.equal(r.ok, false)
+    assert.equal(r.error.code, 'TDD_RED_MISSING', JSON.stringify(r))
+  })
+
+  // FUSION：TDD 硬门 —— 无红灯不得过 G3，记录后放行
+  test('TDD 硬门：checkGate(G3) 无红灯/无验证证据拦截，recordTdd/recordVerify 后放行', () => {
+    const root = freshRoot()
+    const g = new EcGate()
+    const s = g.read(root)
+    s.gates.G1 = { ...s.gates.G1, passed: true, at: 1 }
+    s.gates.G2 = { ...s.gates.G2, passed: true, at: 1 }
+    s.gates.G3 = { ...s.gates.G3, passed: true, at: 1, evidence: 'node --test::0 fail' }
+    s.stage = 'testing'
+    mkdirSync(join(root, STATE_DIR_NAME), { recursive: true })
+    writeFileSync(statePathOf(root), JSON.stringify(s), 'utf8')
+    const rule = { requiredArtifacts: [], requireUserConfirm: false, requireEvidence: true }
+    let r = checkGate('G3', g.read(root), rule)
+    assert.equal(r.ok, false)
+    assert.equal(r.error.code, 'TDD_RED_MISSING', JSON.stringify(r))
+    const tdd = g.recordTdd(root, { failingTest: 'test/x.test.js', outputDigest: '1 failed' })
+    assert.equal(tdd.ok, true, JSON.stringify(tdd.error))
+    r = checkGate('G3', g.read(root), rule)
+    assert.equal(r.error.code, 'VERIFY_MISSING', JSON.stringify(r))
+    const v = g.recordVerify(root, { command: 'node --test', outputDigest: '25 pass 0 fail' })
+    assert.equal(v.ok, true, JSON.stringify(v.error))
+    r = checkGate('G3', g.read(root), rule)
+    assert.equal(r.ok, true, JSON.stringify(r))
+  })
+
+  test('confirmG3 机械拦截：无红灯/无验证证据不落门', () => {
+    const root = freshRoot()
+    const g = new EcGate()
+    const s = g.read(root)
+    s.gates.G2 = { ...s.gates.G2, passed: true, at: 1 }
+    mkdirSync(join(root, STATE_DIR_NAME), { recursive: true })
+    writeFileSync(statePathOf(root), JSON.stringify(s), 'utf8')
+    const r = g.confirmG3(root, { command: 'node --test', outputDigest: 'ok' })
+    assert.equal(r.ok, false)
+    assert.equal(r.error.code, 'TDD_RED_MISSING', JSON.stringify(r))
+  })
+
+  test('ec_stage tdd/green/verify 模式落证据，query 可读回；prompt 每轮注入三强项纪律', async () => {
+    const root = freshRoot()
+    const tool = ECO_TOOLS.find((t) => t.name === 'ec_stage')
+    for (const m of ['tdd', 'green', 'verify']) assert.ok(tool.parameters.properties.mode.enum.includes(m))
+    const tdd = await tool.execute({ mode: 'tdd', failingTest: 'test/a.test.js', outputDigest: 'red', projectRoot: root })
+    assert.equal(tdd.ok, true, JSON.stringify(tdd.error))
+    const green = await tool.execute({ mode: 'green', outputDigest: 'green', projectRoot: root })
+    assert.equal(green.ok, true, JSON.stringify(green.error))
+    const ver = await tool.execute({ mode: 'verify', command: 'node --test', outputDigest: 'all pass', projectRoot: root })
+    assert.equal(ver.ok, true, JSON.stringify(ver.error))
+    const q = await tool.execute({ mode: 'query', projectRoot: root })
+    assert.equal(q.tdd.redRecorded, true)
+    assert.equal(q.verification.checks.length, 1)
+    memoryAction({ action: 'init', projectRoot: root })
+    const p = ecGate.promptSection(root)
+    assert.match(p, /TDD 硬门/)
+    assert.match(p, /证据先于断言/)
+    assert.match(p, /反合理化红线/)
   })
 
   test('promptSection：六岗硬纪律每轮注入；全完成时提示新需求先重置', () => {

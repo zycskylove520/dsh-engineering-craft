@@ -67,7 +67,7 @@
 
 | 工具 | 作用 |
 |---|---|
-| `ec_stage` | 查阶段/门状态、记录门确认、取下一岗位或并行单元 |
+| `ec_stage` | 查阶段/门状态、记录门确认、取下一岗位或并行单元、开新任务（`new-task`），以及记录 TDD 红绿灯（`tdd`/`green`）与验证证据（`verify`）。**TDD 与验证是机械硬门**：没有红灯记录、没有验证证据，G3 直接拦住（`TDD_RED_MISSING`/`VERIFY_MISSING`），不能宣称完成 |
 | `ec_artifact` | 生成交接物模板（落盘 + 登记指针）或校验结构；`path` 省略默认落 `.project_memory/tmp/<文件名>`，且**只能落在 `.project_memory/tmp/` 内**，越界返回 `ARTIFACT_OUTSIDE_TMP`；新增 `progress`（PROGRESS.md 五节 Goal/Done/Next/Open questions/Key facts） |
 | `ec_memory` | `.project_memory/` 建库（6 职责目录 + 3 根文件 + tmp，职责目录自动带边界声明桩）/ 写规范（**职责目录**强制五件套并附**内容质量软警告**：清单式计数 / 纯行号证据；`tmp` 与 3 根文件 `index/status/open-questions` 免校验、写自由文本如 PLAN/导航/快照）/ `query` 按需读 / `recall` 写码前按线索检索全规范层，**字面整句优先、零命中分词/二元组回退**、按相关性排序、可按 `kind`/`layer` 过滤，返回 id/kind/file/matchMode / `audit` 建库自检 + **qualityScore 质量分**（边界声明、清单式、纯行号证据、**RULE 占比**、**配方覆盖**、**插件实现幻觉**、无 header 散文文件、PLAN 覆盖映射；init 生成的桩豁免无条目扣分、agent 写进桩的散文照常报；≥60 才 passed）/ `patch` 按 id 条目级更新（改正文或加 `状态:` 行，不动其他条目，认 `##` 与 `- [OPEN]` 两种前缀） |
 | `ec_gate_metrics` | GATE-LOG 门度量记录与回看；GATE-LOG 落 `.project_memory/tmp/GATE-LOG.md`（每行一条 JSON，对齐 skill `core/gate-metrics.md` 六字段：日期/阶段/门/结果 拦住\|通过\|绕过/缺什么/处置；无兼容：旧 `.engineering-craft/gate-log.jsonl` 不再读取合并），`record` 支持 stage/missing/disposition 参数、outcome 只接受中文 拦住\|通过\|绕过（英文 blocked/passed 不识别） |
@@ -91,6 +91,8 @@
 **不适合**：纯闲聊、查资料、非代码任务。
 
 **所有代码任务（含小改动/增量功能）一律严格走完整六岗位流水线**，不得以"小功能、增量、直接改"为由跳过任何岗位。岗位可经评估后快速完成——落该岗交接物把它标记为完成，再由 `ec_stage next-role` 推进；但岗位本身不可省略。识别到用户提出**新需求**时，先调 `ec_stage(mode=new-task)`（或 `/ec new-task`）归档旧状态并重置六岗（工程记忆不动），再从 product 岗重新走完整流程；不要复用上一需求"全部完成"的状态直接开工。旧状态在 `.ec-state/history/` 可找回。
+
+**工程纪律硬门（融合 obra/superpowers 方法论）**：① **TDD**——写生产代码前先写失败测试，调 `ec_stage mode=tdd` 记红灯，改完调 `mode=green` 记绿灯；没有红灯记录 G3 门机械拒绝。② **证据先于断言**——宣称完成/通过/修好前先真实跑验证命令，调 `ec_stage mode=verify` 落「命令+本次输出摘要」；没有验证证据 G3 门机械拒绝。会话头每轮注入反合理化红线（"太简单不用走流程""先写实现回头补测试""agent 说成功就算完成"等一律视为违规）。
 
 ## 已知限制
 

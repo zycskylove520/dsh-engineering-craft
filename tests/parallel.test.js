@@ -31,9 +31,14 @@ function developerState(plan) {
       G2: { passed: true, confirmedBy: 'user', at: 2, evidence: null },
       G3: { passed: false, confirmedBy: 'agent', at: null, evidence: null },
     },
-    artifacts: { ...DEV_ARTIFACTS },
+    artifacts: { ...DEV_ARTIFACTS, progress: null },
     plan,
+    tdd: { redRecorded: false, failingTest: null, redAt: null, greenAt: null },
+    verification: { checks: [] },
     pipeline: { role: null, status: 'pending', handoffs: {} },
+    releaseDecision: null,
+    metrics: { lastGate: null, blockCount: 0 },
+    updatedAt: 0,
   }
 }
 

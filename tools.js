@@ -39,12 +39,14 @@ export const ecStageTool = {
     type: 'object',
     properties: {
       mode: {
-        type: 'string', enum: ['query', 'confirm-gate', 'next-role', 'new-task'], default: 'query',
-        description: 'query=只读状态；confirm-gate=记录人确认/证据；next-role=返回下一岗位；new-task=归档旧 state 并把六岗位/门/交接物重置为初始态（工程记忆不动）。识别到新需求时先调它，再走六岗',
+        type: 'string', enum: ['query', 'confirm-gate', 'next-role', 'new-task', 'tdd', 'green', 'verify'], default: 'query',
+        description: 'query=只读状态；confirm-gate=记录人确认/证据；next-role=返回下一岗位；new-task=归档旧 state 并重置（工程记忆不动）；tdd=记录 TDD 红灯（failingTest 必填，写生产代码前先有失败测试）；green=记录测试转绿；verify=记录一条验证证据（command+outputDigest，宣称完成前必须先跑并落证据）。识别到新需求先 new-task，再严格走六岗，开发岗必须先 tdd 再写代码',
       },
       gate: { type: 'string', enum: ['G1', 'G2', 'G3'], description: 'confirm-gate 时必填' },
       evidence: { type: 'string', description: 'G3 confirm-gate 时必填：命令+输出摘要（非全文）' },
       userConfirmed: { type: 'boolean', description: 'G1/G2 confirm-gate 时必填：确认卡由人点过才置 true，agent 不得自报' },
+      failingTest: { type: 'string', description: 'mode=tdd 时必填：失败测试文件/用例指针（红灯证据）' },
+      outputDigest: { type: 'string', description: 'mode=tdd/green/verify 时：本次真实运行的命令输出摘要（非全文）' },
       capabilities: {
         type: 'object',
         properties: { subagent: { type: 'boolean', description: '能力门：false 关闭研发岗形态 B，退回形态 A 顺序岗位' } },
@@ -81,6 +83,17 @@ export const ecStageTool = {
         const role = ecGate.nextRole(root, roleOpts)
         return { ok: true, ...role }
       }
+      if (mode === 'tdd' || mode === 'green') {
+        const payload = mode === 'tdd'
+          ? { failingTest: args.failingTest, outputDigest: args.outputDigest }
+          : { outputDigest: args.outputDigest }
+        const r = mode === 'tdd' ? ecGate.recordTdd(root, payload) : ecGate.recordGreen(root, payload)
+        return r.ok ? { ok: true, mode, tdd: r.value.tdd, stage: r.value.stage } : r
+      }
+      if (mode === 'verify') {
+        const r = ecGate.recordVerify(root, { command: args.command ?? args.evidence, outputDigest: args.outputDigest })
+        return r.ok ? { ok: true, mode, checks: r.value.verification.checks.length, stage: r.value.stage } : r
+      }
       if (mode === 'confirm-gate') {
         if (!args.gate) return { ok: false, error: ecError('INVALID_INPUT', 'confirm-gate 须指定 gate', {}) }
         // G1/G2 只由人拍板：工具调用者须显式声明 userConfirmed；G3 走证据路径。
@@ -113,6 +126,8 @@ export const ecStageTool = {
         stage: state.stage,
         gates: Object.fromEntries(Object.entries(state.gates).map(([g, v]) => [g, v.passed])),
         gateResults,
+        tdd: state.tdd ?? null,
+        verification: state.verification ?? null,
         nextRole: role.role,
         mode: role.mode ?? 'A',
         parallelRoles: role.roles ?? [],

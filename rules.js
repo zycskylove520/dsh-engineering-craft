@@ -61,6 +61,14 @@ export function checkGate(gateId, state, rule) {
   if (rule?.requireEvidence && !gate.evidence) {
     return fail('NO_EVIDENCE', `门 ${gateId} 缺真实命令输出证据`, { gateId })
   }
+  // FUSION-TDD/VERIFY：最终门 G3 无条件要求"先有失败测试（红）+ 新鲜验证证据"。
+  // 无兼容：state 没带 tdd/verification 字段 = 没做 = 拦，必须补做才能过门。
+  if (gateId === 'G3' && !state?.tdd?.redRecorded) {
+    return fail('TDD_RED_MISSING', '门 G3 缺 TDD 红灯证据：写生产代码前须先有失败测试并调 ec_stage(mode="tdd") 记录', { gateId })
+  }
+  if (gateId === 'G3' && (!Array.isArray(state?.verification?.checks) || state.verification.checks.length === 0)) {
+    return fail('VERIFY_MISSING', '门 G3 缺验证清单：宣称完成前须调 ec_stage(mode="verify") 落至少一条「命令+输出摘要」证据', { gateId })
+  }
   if (!gate.passed) {
     return fail('GATE_NOT_PASSED', `门 ${gateId} 尚未记录放行`, { gateId })
   }

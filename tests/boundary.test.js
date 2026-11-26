@@ -37,6 +37,9 @@ function makeState(over = {}) {
       brief: null, release: null, testReport: null, findings: null,
     },
     plan: [],
+    // 纪律已满足的默认态（本文件测的是门的其他分支，不做无兼容拦截测试）
+    tdd: { redRecorded: true, failingTest: 'test/x.test.js', redAt: 1, greenAt: 2 },
+    verification: { checks: [{ command: 'node --test', outputDigest: 'pass', at: 1 }] },
     pipeline: { role: null, status: 'pending', handoffs: {} },
     metrics: { lastGate: null, blockCount: 0 },
     updatedAt: 0,
@@ -313,7 +316,7 @@ describe('EcState · stateVersion=2 与字段完整性（CONTRACT §9）', () =>
     const s = initialState(root)
     assert.equal(s.version, 2)
     assert.deepEqual(Object.keys(s).sort(),
-      ['artifacts', 'gates', 'metrics', 'pipeline', 'plan', 'projectRoot', 'releaseDecision', 'stage', 'updatedAt', 'version'])
+      ['artifacts', 'gates', 'metrics', 'pipeline', 'plan', 'projectRoot', 'releaseDecision', 'stage', 'tdd', 'updatedAt', 'verification', 'version'])
   })
 
   test('gates 三门的确认方约束：G1/G2=user，G3=agent；初值 passed=false', () => {

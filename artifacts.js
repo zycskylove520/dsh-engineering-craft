@@ -22,7 +22,7 @@ export const ARTIFACT_SCHEMA = Object.freeze({
   plan: ['目标', '检索套用约束', '单元', '覆盖映射'],
   brief: ['变更摘要', '风险', '验证结论'],
   release: ['发布清单', '回滚预案', '观察项', 'go/no-go'],
-  testReport: ['测试代码指针', '覆盖率', '边界异常', '真实输出', '证据分级'],
+  testReport: ['测试代码指针', 'TDD 红灯证据', 'TDD 绿灯证据', '覆盖率', '边界异常', '真实输出', '证据分级'],
   findings: ['id', 'severity', 'file:line', 'issue', 'fix', 'VERDICT'],
   progress: ['Goal', 'Done', 'Next', 'Open questions', 'Key facts'],
 })
@@ -35,7 +35,7 @@ const TEMPLATES = Object.freeze({
   plan: '# PLAN · 执行计划\n\n## 目标\n\n## 检索套用约束\n\n<!-- 写码前 recall 命中的工程记忆条目 id 列此；无命中标「无既有约定」 -->\n\n## 单元\n\n- [ ] id=P1 target=… ownerFiles=[…] acceptance=… status=todo constraints=[R-XXX-01]\n\n## 覆盖映射\n\n<!-- 源码顶层目录/模块类别 → 归属文档；建库自检要贴这张表的 diff -->\n\n| 源码目录/模块 | 归属文档 |\n| --- | --- |\n|  |  |\n',
   brief: '# BRIEF · 评审简报\n\n## 变更摘要\n\n## 风险\n\n## 验证结论\n',
   release: '# RELEASE · 发布清单\n\n## 发布清单\n\n## 回滚预案\n\n## 观察项\n\n## go/no-go(人)\n',
-  testReport: '# TEST-REPORT · 测试报告\n\n## 测试代码指针\n\n## 覆盖率\n\n## 边界异常\n\n## 真实输出\n\n## 证据分级(实测/推断/猜测)\n',
+  testReport: '# TEST-REPORT · 测试报告\n\n## 测试代码指针\n\n## TDD 红灯证据(先于实现，失败测试+输出摘要)\n\n## TDD 绿灯证据(实现后的通过输出)\n\n## 覆盖率\n\n## 边界异常\n\n## 真实输出\n\n## 证据分级(实测/推断/猜测)\n',
   findings: '# FINDINGS · 评审发现\n\n| id | severity | file:line | issue | fix |\n| --- | --- | --- | --- | --- |\n\n## VERDICT\n',
   progress: '# PROGRESS · 长任务接力\n\n## Goal\n\n## Done\n\n## Next\n\n## Open questions\n\n## Key facts\n',
 })

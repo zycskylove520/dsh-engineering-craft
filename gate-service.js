@@ -195,6 +195,9 @@ export function initialState(projectRoot) {
       progress: null,
     },
     plan: [],
+    // FUSION-TDD/VERIFY：融合工程纪律——红绿灯状态与"证据先于断言"验证清单。
+    tdd: { redRecorded: false, failingTest: null, redAt: null, greenAt: null },
+    verification: { checks: [] }, // 每项 {command, outputDigest, at}
     pipeline: { role: null, status: 'pending', handoffs: {} },
     releaseDecision: null,
     metrics: { lastGate: null, blockCount: 0 },
@@ -240,19 +243,26 @@ export default class EcGate {
       throw ecError('STORAGE_UNAVAILABLE',
         `stateVersion 不匹配：${file} 期望 ${STATE_VERSION}，实际 ${parsed?.version}`, { file })
     }
-    // v2 字段自愈：缺 pipeline/metrics/releaseDecision 等新增字段时用 initialState 补齐（内存），
-    // 避免下游 deep 访问抛裸 TypeError（实测缺 metrics → confirmGate 写 lastGate 崩），
-    // 且不破坏"v1 不迁移"的约定——version 不符仍在上面直接拒绝。
+    // 无兼容：state.json 必须字段齐全，缺任何一个都直接报错，不补齐、不迁移。
+    // 插件尚未被任何项目使用，不需要给旧形状开自愈后门；残缺 state 是坏数据，应显式暴露。
     const base = initialState(projectRoot)
-    for (const k of ['pipeline', 'metrics', 'releaseDecision', 'updatedAt']) {
-      if (parsed[k] === undefined) parsed[k] = base[k]
+    const missing = Object.keys(base).filter((k) => !(k in parsed))
+    if (missing.length) {
+      throw ecError('STORAGE_UNAVAILABLE', `state.json 字段缺失：${file}（缺 ${missing.join(', ')}）`, { file, missing })
     }
-    if (!Array.isArray(parsed.plan)) parsed.plan = []
+    if (!Array.isArray(parsed.plan)) {
+      throw ecError('STORAGE_UNAVAILABLE', `state.json plan 字段不合法：${file}`, { file })
+    }
     if (!parsed.artifacts || typeof parsed.artifacts !== 'object') {
       throw ecError('STORAGE_UNAVAILABLE', `state.json artifacts 字段不合法：${file}`, { file })
     }
-    // artifacts 的新键（如 progress）补齐，避免 Object.entries 漏键
-    for (const k of Object.keys(base.artifacts)) if (!(k in parsed.artifacts)) parsed.artifacts[k] = null
+    const missingArtifacts = Object.keys(base.artifacts).filter((k) => !(k in parsed.artifacts))
+    if (missingArtifacts.length) {
+      throw ecError('STORAGE_UNAVAILABLE', `state.json artifacts 缺键：${missingArtifacts.join(', ')}`, { file, missingArtifacts })
+    }
+    if (!parsed.tdd || typeof parsed.tdd !== 'object' || !parsed.verification || typeof parsed.verification !== 'object') {
+      throw ecError('STORAGE_UNAVAILABLE', `state.json tdd/verification 字段不合法：${file}`, { file })
+    }
     // gates 每门必须是对象且 passed 为布尔（否则 promptSection/gateResults 会 TypeError）。
     for (const g of ['G1', 'G2', 'G3']) {
       if (!parsed.gates[g] || typeof parsed.gates[g] !== 'object' || typeof parsed.gates[g].passed !== 'boolean') {
@@ -394,6 +404,76 @@ export default class EcGate {
   }
 
   /**
+   * FUSION-TDD：记录 TDD 红灯（失败测试）——生产代码之前的硬证据。
+   * @param {string} projectRoot 项目根
+   * @param {{failingTest: string, outputDigest?: string}} tdd 失败测试指针与输出摘要
+   * @returns {{ok:true,value:object}|{ok:false,error:object}} Result
+   */
+  recordTdd(projectRoot, tdd) {
+    const failingTest = String(tdd?.failingTest ?? '').trim()
+    if (!failingTest) return fail(ecError('INVALID_INPUT', 'TDD 红灯须给 failingTest（失败测试文件/用例指针）', {}))
+    try {
+      const state = this.read(projectRoot)
+      state.tdd = {
+        redRecorded: true,
+        failingTest: failingTest.slice(0, 500),
+        redOutput: String(tdd.outputDigest ?? '').slice(0, 500) || null,
+        redAt: Date.now(),
+        greenAt: null,
+      }
+      state.updatedAt = Date.now()
+      this.write(state, projectRoot)
+      return ok(state)
+    } catch (e) {
+      return fail(ecError('STORAGE_UNAVAILABLE', `TDD 记录失败：${e?.message ?? e}`, {}))
+    }
+  }
+
+  /**
+   * 记录 TDD 绿灯（测试转绿，附真实输出摘要）。
+   * @param {string} projectRoot 项目根
+   * @param {{outputDigest?: string}} tdd
+   * @returns {{ok:true,value:object}|{ok:false,error:object}} Result
+   */
+  recordGreen(projectRoot, tdd) {
+    const state = this.read(projectRoot)
+    if (!state.tdd?.redRecorded) {
+      return fail(ecError('TDD_RED_MISSING', '未有 TDD 红灯记录，不能记绿灯', {}))
+    }
+    state.tdd.greenAt = Date.now()
+    state.tdd.greenOutput = String(tdd?.outputDigest ?? '').slice(0, 500) || null
+    state.updatedAt = Date.now()
+    try { this.write(state, projectRoot); return ok(state) } catch (e) {
+      return fail(ecError('STORAGE_UNAVAILABLE', `绿灯记录失败：${e?.message ?? e}`, {}))
+    }
+  }
+
+  /**
+   * FUSION-VERIFY：记录一条验证证据（命令 + 新鲜输出摘要）——"证据先于断言"的机械落点。
+   * @param {string} projectRoot 项目根
+   * @param {{command: string, outputDigest: string}} evidence
+   * @returns {{ok:true,value:object}|{ok:false,error:object}} Result
+   */
+  recordVerify(projectRoot, evidence) {
+    const command = String(evidence?.command ?? '').trim()
+    const outputDigest = String(evidence?.outputDigest ?? '').trim()
+    if (!command || !outputDigest) {
+      return fail(ecError('NO_EVIDENCE', '验证须给 command 与 outputDigest（本次真实运行的输出摘要）', {}))
+    }
+    try {
+      const state = this.read(projectRoot)
+      if (!Array.isArray(state.verification?.checks)) state.verification = { checks: [] }
+      state.verification.checks.push({ command: command.slice(0, 240), outputDigest: outputDigest.slice(0, 240), at: Date.now() })
+      if (state.verification.checks.length > 50) state.verification.checks = state.verification.checks.slice(-50)
+      state.updatedAt = Date.now()
+      this.write(state, projectRoot)
+      return ok(state)
+    } catch (e) {
+      return fail(ecError('STORAGE_UNAVAILABLE', `验证记录失败：${e?.message ?? e}`, {}))
+    }
+  }
+
+  /**
    * 记录 G3 窄检通过（需真实命令输出证据；confirmBy=agent）。
    * @param {string} projectRoot 项目根
    * @param {{command: string, outputDigest: string}} evidence 命令与输出摘要（非全文）
@@ -408,6 +488,14 @@ export default class EcGate {
     // 门序：G3 须在 G2 之后确认。
     if (!state.gates.G2.passed) {
       return fail(ecError('GATE_ORDER', 'G2 未过，不能先确认 G3', { gate: 'G3', prerequisite: 'G2' }))
+    }
+    // FUSION-TDD/VERIFY 机械门：没有红灯记录、没有验证清单，不许过 G3。
+    // 无兼容：字段缺失 = 没做 = 拦，不因旧 state 形状放行。
+    if (!state.tdd?.redRecorded) {
+      return fail(ecError('TDD_RED_MISSING', 'G3 被拦：没有 TDD 红灯记录，先写失败测试并调 ec_stage(mode="tdd")', { gate: 'G3' }))
+    }
+    if (!Array.isArray(state.verification?.checks) || state.verification.checks.length === 0) {
+      return fail(ecError('VERIFY_MISSING', 'G3 被拦：没有验证证据，先跑验证命令并调 ec_stage(mode="verify")', { gate: 'G3' }))
     }
     state.gates.G3 = {
       passed: true,
@@ -531,6 +619,10 @@ export default class EcGate {
       // FIX-enforce-pipeline：每轮注入六岗硬纪律——堵住"增量小功能直接改、不走完整流水线"偷懒。
       // 允许在岗位内评估后把某岗直接标完成（落交接物），但不允许跳过岗位本身。
       '流程纪律（硬）：所有代码任务必须严格走 product→architect→developer→tester→reviewer→ops 六岗位流水线，不得跳过任何岗位、不得以"小功能/增量"为由直接改代码。若某岗位经评估确不适用，也要按流程落该岗交接物把它标记为完成（ec_artifact create 落盘即登记），再由 ec_stage(mode=next-role) 推进到下一岗——岗位可以"快速完成"，不能被跳过。',
+      // FUSION 三强项：TDD 硬门 + 证据先于断言 + 反合理化红线。
+      'TDD 硬门：写任何生产/业务代码前，先写会失败的测试并调 ec_stage(mode="tdd", failingTest=<测试指针>, outputDigest=<红灯输出摘要>) 记红灯；没有红灯记录不得写实现（G3 会机械拦截）。实现改完跑测试转绿再调 ec_stage(mode="green", outputDigest=<绿灯输出>)。',
+      '证据先于断言：宣称"完成/修好/测试通过/验证过"之前，必须先真实运行验证命令并调 ec_stage(mode="verify", command=<命令>, outputDigest=<本次输出摘要>) 落证据（G3 会机械核验）。"应该能过/上次跑过/agent 说成功"都不算证据。',
+      '反合理化红线（出现即视为违规）：①"这个太简单不用走流程"→简单=更短的流程，不是没有；②"先看下代码再决定"→先路由再探索；③"先写实现回头补测试"→没有例外；④"测试之前跑过了"→证据只在本次运行有效，重跑；⑤"子 agent 说完成了"→独立核验 diff 与输出；⑥"计划口头说一下"→须按工具落盘（ec_artifact create）；⑦"我很有信心所以算过"→信心≠证据。',
     ]
     if (allComplete) {
       // FIX-new-task-aware：六岗全完成时，提示 agent 识别新需求要主动重置（用户不会每次说"开始工程"）。
